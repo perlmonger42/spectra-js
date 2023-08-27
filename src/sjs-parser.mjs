@@ -552,7 +552,7 @@ export function New_Expression_Literal(Literal) {
   return { Kind: 'Expression', Tag: 'Literal', Literal };
 }
 
-let prefix_unary_ops = new RegExp ('^(new|[-+!]|typeof)$');
+let prefix_unary_ops = new RegExp ('^(new|[-+!]|typeof|await)$');
 
 export function New_Expression_UnaryPrefix(Operator, Operand) {
   assert_is_string_match('New_Expression_UnaryPrefix.Operator', Operator, prefix_unary_ops);
@@ -783,7 +783,7 @@ function factor(parser) {
       value = New_Expression_Apply(value, parenthesized_expression_list(parser, {}));
     } else if (match(parser, 'DOT')) {
       let op = advance(parser);
-      let field = skip(parser, 'throw') || expect(parser, 'SYMBOL', "expected SYMBOL after `.`");
+      let field = skip(parser, 'throw') || skip(parser, 'from') || expect(parser, 'SYMBOL', "expected SYMBOL after `.`");
       value = New_Expression_Binary(op[1], value, New_Expression_Symbol(field[1]));
     } else if (match(parser, 'LBRACK')) {
       let op = advance(parser);
@@ -810,8 +810,8 @@ function postfix_unary(parser) {
 }
 
 function prefix_unary(parser) {
-  // prefix_unary ::= { ('-'|'+'|'!'|'++'|'--'|typeof) } postfix_unary
-  if (match_any(parser, ['PLUS', 'MINUS', 'NOT', 'INC', 'DEC', 'typeof'])) {
+  // prefix_unary ::= { ('-'|'+'|'!'|'++'|'--'|typeof|await) } postfix_unary
+  if (match_any(parser, ['PLUS', 'MINUS', 'NOT', 'INC', 'DEC', 'typeof', 'await'])) {
     let op = advance(parser);
     let arg = prefix_unary(parser);
     return New_Expression_UnaryPrefix(op[1], arg);
@@ -1118,7 +1118,7 @@ function statement_block(parser, extra_expect_message) {
 }
 
 
-function function_declaration(parser, exported) {
+function function_declaration(parser, exported, is_async) {
   // function_declaration := 'function' SYMBOL '(' optional_identifier_list? ')' body
   expect(parser, 'function');
   let name = expect(parser, 'SYMBOL', 'expected SYMBOL (to define the function name)');
@@ -1126,7 +1126,7 @@ function function_declaration(parser, exported) {
   let signature = function_signature(parser);
   //console.log(`after function_signature in function_declaration, at ${showCurrentToken(parser)}`);
   let body = statement_block(parser, "at start of function body");
-  return New_Declaration_Function(name[1], signature, body, !!exported);
+  return New_Declaration_Function(name[1], signature, body, !!exported, !!is_async);
 }
 
 function variable_declaration(parser, exported) {
@@ -1212,12 +1212,13 @@ function maybe_import(parser) {
   return Just(New_Import_List(identifiers, module_path[1]));
 }
 
-export function New_Declaration_Function(Name, Signature, Body, Exported) {
+export function New_Declaration_Function(Name, Signature, Body, Exported, IsAsync) {
   assert_is_string("New_Declaration_Function.Name", Name);
   assert_is_kind("New_Declaration_Function.Signature", Signature, 'FunctionSignature');
   assert_is_kind_tag("New_Declaration_Function.Body", Body, 'Statement', 'Block');
   assert_is_boolean("New_Declaration_Function.Exported", Exported);
-  return { Kind: 'Declaration', Tag: 'Function', Name, Signature, Body, Exported };
+  assert_is_boolean("New_Declaration_Function.IsAsync", IsAsync);
+  return { Kind: 'Declaration', Tag: 'Function', Name, Signature, Body, Exported, IsAsync };
 }
 
 
@@ -1248,13 +1249,17 @@ export function New_Declaration_Statement(Statement) {
 function maybe_declaration(parser) {
   //console.log(`maybe_declaration, at ${showCurrentToken(parser)}`);
   let exported = skip(parser, 'export');
+  let is_async = skip(parser, 'async');
+  if (!!is_async && peek(parser) !== 'function') {
+    expect(parser, 'UNMATCHABLE', "expected `function` after `async`");
+  }
   if (match(parser, 'EOF')) {
     if (exported) {
       throw new SyntaxError(`unexpected end-of-input after 'export'`);
     }
     return None('DECLARATION');
   } else if (match(parser, 'function')) {
-    return Just(function_declaration(parser, exported));
+    return Just(function_declaration(parser, exported, is_async));
   } else if (match_any(parser, ['let', 'var', 'const'])) {
     return Just(variable_declaration(parser, exported));
   } else {

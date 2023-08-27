@@ -63,7 +63,7 @@ let tokenMatchers = [
   TokenMatcher('INC',           '[+][+]'),
   TokenMatcher('DEC',           '--'),
   TokenMatcher('BOOLEAN',       '(?:true|false)\\b'),
-  TokenMatcher('KEYWORD',       '(as|const|do|else|end|export|if|for|from|function|import|let|module|new|of|return|then|throw|typeof|var|while)\\b'),
+  TokenMatcher('KEYWORD',       '(as|async|await|const|do|else|end|export|if|for|from|function|import|let|module|new|of|return|then|throw|typeof|var|while)\\b'),
   TokenMatcher('SYMBOL',        '[_a-zA-Z][_a-zA-Z0-9]*'),
   TokenMatcher('FIXNUM',        '\\d+'),
   TokenMatcher('PLUS',          '[+]'),

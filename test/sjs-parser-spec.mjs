@@ -359,7 +359,7 @@ describe("SimpleJS Parser", function () {
       let parser = NewParser(NewLexer("function f() { }"));
       let sig = New_FunctionSignature([]);
       let body = New_Statement_Block([]);
-      let decl = New_Declaration_Function("f", sig, body, false);
+      let decl = New_Declaration_Function("f", sig, body, false, false);
       let unit = singleDefinitionProgram(decl);
       expect(Parse(parser).Just).to.deep.equal(unit);
     });
@@ -458,7 +458,8 @@ describe("SimpleJS Parser", function () {
           }
         ]
       },
-      "Exported": false
+      "Exported": false,
+      "IsAsync": false
     }
   ]
 }`;
@@ -471,11 +472,11 @@ describe("SimpleJS Parser", function () {
       'test/resources/test-01.sjs',
       'test/resources/test-03.sjs',
       'test/resources/test-02.sjs',
-      'src/sjs-to-js.mjs',
+      'cmd/sjs-to-js.mjs',
       // 'src/run-tests.mjs',  /* contains `async` and `await`
       'src/sjs-lexer.mjs',
       'test/sjs-lexer-spec.mjs',
-      'src/emit-sjs.mjs',
+      'src/emit-js.mjs',
       'test/sjs-parser-spec.mjs',
       'src/sjs-parser.mjs',
     ];

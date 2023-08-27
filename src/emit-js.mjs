@@ -30,7 +30,7 @@ function maybe_nl_emit(should_newline, text) {
 }
 
 function emit(text) {
-  process.stdout.write(text);
+  // process.stdout.write(text);  // for echoing to stdout as it's generated
   emitter.writer(text);
 
   let i = 0;
@@ -116,7 +116,7 @@ function emit_import(item) {
 
 function emit_declaration(decl) {
   // decl is            Declaration
-  // Declaration has    { Tag: 'Function', Name, Signature, Body, Exported }
+  // Declaration has    { Tag: 'Function', Name, Signature, Body, Exported, IsAsync }
   //              or    { Tag: 'Variable', Keyword, Variable, Initializer, Exported };
   //              or    { Tag: 'Variables', Keyword, Variables, Initializer, Exported };
   //              or    { Tag: 'Statement', Statement };
@@ -139,10 +139,13 @@ function emit_declaration_function(decl) {
   //         , Signature: FunctionSignature
   //         , Body: Statement/Block
   //         , Exported: boolean
+  //         , IsAsync: boolean
   //         }
   // FunctionSignature is { Kind: 'FunctionSignature', FormalParameters: [string...] };
   nl_emit('');
-  nl_emit(decl.Exported ? 'export function ' : 'function ');
+  nl_emit(decl.Exported ? 'export ' : '');
+  emit(decl.IsAsync ? 'async ' : '');
+  emit('function ');
   emit(decl.Name);
   emit_list_of_names('(', decl.Signature.FormalParameters, ') ');
   emit_statement_block(decl.Body);
@@ -355,7 +358,7 @@ function emit_expression_unary(expr) {
   let prec = precedence(expr);
   if (expr.Prefix) {
     emit(expr.Operator);
-    if (expr.Operator === 'typeof') {
+    if (expr.Operator === 'typeof' || expr.Operator === 'await') {
       emit(' ');
     }
   }
@@ -502,7 +505,8 @@ function precedence(expr) {
   } else if (expr.Tag === 'Unary') {
     if (expr.Prefix) {
       if (expr.Operator === '-' || expr.Operator === '+' || expr.Operator === '!'
-      ||  expr.Operator === '++' || expr.Operator === '--' || expr.Operator === 'typeof') {
+      ||  expr.Operator === '++' || expr.Operator === '--'
+      || expr.Operator === 'typeof' || expr.Operator === 'await') {
       return 14;
       }
     } else if (expr.Operator === '--' || expr.Operator === '++') {

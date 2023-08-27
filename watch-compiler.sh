@@ -17,7 +17,7 @@ while true; do
   #echo === Scanning... ===
   if [[  ( ! -f $LATEST ) || -n "$(find src test -name '*.*js' -newer $LATEST -print | head -n 1)" ]]; then
     clear
-    npm test && node src/run-tests.mjs && node src/sjs-to-js.mjs ${SRC}
+    npm test && node cmd/run-tests.mjs && node cmd/sjs-to-js.mjs --verbose src/*.mjs cmd/*.mjs
     touch $LATEST
   fi
 done

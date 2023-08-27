@@ -76,7 +76,7 @@ async function run_test(script_filename) {
   let output_filename = script_filename.replace(extension, '.compiled.mjs');
 
   // compile
-  let result = await run_program('node', ['src/sjs-to-js.mjs', script_filename]);
+  let result = await run_program('node', ['cmd/sjs-to-js.mjs', script_filename]);
   if (result.status !== 0) {
     console.error(`  Failed to compile ${script_filename}`);
     return false;
