@@ -1,9 +1,12 @@
 {
   "scripts": {
-    "test": "mocha"
+    "test": "mocha -R spec"
   },
   "devDependencies": {
-    "chai": "*",
-    "mocha": "*"
+    "chai": "^4.3.7",
+    "mocha": "^10.2.0"
+  },
+  "dependencies": {
+    "glob": "^10.3.3"
   }
 }
