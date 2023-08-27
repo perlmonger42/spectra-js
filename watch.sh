@@ -1,15 +1,17 @@
 #!/usr/bin/env bash
-# See: `/Users/thom/Google-Drive/src/Go/spectra/04\ -\ go-tdop/go-tdop/watch.sh`
-
 export WATCH_PATH="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
-echo "Watching $WATCH_PATH/**/*.mjs"
+echo "Watching $WATCH_PATH"
 LATEST=$WATCH_PATH/.watch-timestamp
 while true; do
   sleep .25
   #echo === Scanning... ===
-  if [[  ( ! -f $LATEST ) || -n "$(find . -name '*.mjs' -newer $LATEST -print | head -n 1)" ]]; then
+  if [[  ( ! -f $LATEST ) || -n "$(find src cmd test -name '*.mjs' -newer $LATEST -print | head -n 1)" ]]; then
     clear
-    npm test
+    echo '===== Running unit tests =====' && npm test && \
+      echo '===== Running test scripts =====' && node cmd/run-tests.mjs && \
+      echo '===== Compiling {src,cmd}/*.mjs =====' && node cmd/sjs-to-js.mjs --verbose src/*.mjs cmd/*.mjs
+    # we only compiled the sources to make sure they don't generate errors; don't keep the output
+    find ./cmd ./src ./test -name '*.compiled.mjs' -delete
     touch $LATEST
   fi
 done

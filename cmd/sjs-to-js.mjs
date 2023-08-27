@@ -28,9 +28,8 @@ function generate_output_filename(input_filename, output_dirname) {
 }
 
 function transpile_filename(input_filename, output_dirname) {
-  let output_filename = generate_output_filename(input_filename, output_dirname);
   if (Verbose) {
-    console.log(output_filename);
+    console.log(input_filename);
   }
 
   let file_content;
@@ -43,6 +42,7 @@ function transpile_filename(input_filename, output_dirname) {
   transpile_from_string(input_filename, file_content, writer);
 
   let extension = new RegExp('[.][^.]*$|$');
+  let output_filename = generate_output_filename(input_filename, output_dirname);
 //console.log(`Writing \`${output_filename}\``);
   fs.writeFileSync(output_filename, js, 'utf8');
 }
