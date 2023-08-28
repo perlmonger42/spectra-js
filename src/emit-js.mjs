@@ -3,6 +3,7 @@ import { describe, isJust, isNone, InternalError
        } from '../src/sjs-parser.mjs';
 
 let emitter; // { writer, current_indent, indent_stack, current_line, current_column }
+let lang; // { fn, do,end }
 
 function to_s(value) {
   return describe(value, 2000);
@@ -15,18 +16,6 @@ function indent(extra_indent) {
 
 function undent() {
   emitter.current_indent = emitter.indent_stack.pop();
-}
-
-function nl_emit(text) {
-  emit('\n' + emitter.current_indent + text);
-}
-
-function maybe_nl_emit(should_newline, text) {
-  if (should_newline) {
-    nl_emit(text);
-  } else {
-    emit(text);
-  }
 }
 
 function emit(text) {
@@ -53,10 +42,39 @@ function emit(text) {
   // console.log(`line: ${emitter.current_line}, column: ${emitter.current_column}`);
 }
 
-export function Generate(input_file_name, unit, writer) {
-  emitter = { writer, current_indent: '', indent_stack: [ ]
+function blank_line() {
+  emitter.writer('\n');
+  emitter.current_line++;
+  emitter.current_column = 1;
+}
+
+function nl() {
+  emit('\n' + emitter.current_indent);
+}
+
+function nl_emit(text) {
+  emit('\n' + emitter.current_indent + text);
+}
+
+function maybe_nl_emit(should_newline, text) {
+  if (should_newline) {
+    nl_emit(text);
+  } else {
+    emit(text);
+  }
+}
+
+export function Generate(target_language, input_file_name, unit, writer) {
+  emitter = { target_language
+            , writer, current_indent: '', indent_stack: [ ]
             , current_line: 1, current_column: 1
             };
+  lang = {
+    fn: target_language === 'js' ? 'function' : 'fn',
+    'do': target_language === 'js' ? '{' : 'do',
+    'end': target_language === 'js' ? '}' : 'end',
+    emit_if_stmt: target_language === 'js' ? js_emit_statement_if : sp1_emit_statement_if,
+  };
   emit_unit(unit);
 }
 
@@ -79,9 +97,14 @@ function emit_unit(unit) {
   emit(`// module ${name};`);
 
   for (let item of unit.ImportList) {
+    nl();
     emit_import(item);
   }
+  nl();
+
   for (let decl of unit.DeclarationList) {
+    blank_line();
+    nl();
     emit_declaration(decl);
   }
   emit('\n');
@@ -95,7 +118,7 @@ function emit_import(item) {
   // ImportList is     [ string... ]
   if (item.Tag === 'Import') {
     let start_line = emitter.current_line;
-    nl_emit(`import { `);
+    emit(`import { `);
     indent ('       ');
     let comma = '';
     let newlines = false;
@@ -110,7 +133,7 @@ function emit_import(item) {
     maybe_nl_emit(newlines,  `} from ${item.ModulePath};`);
     undent();
   } else if (item.Tag === 'As') {
-    nl_emit(`import * as ${item.Name} from ${item.ModulePath};`);
+    emit(`import * as ${item.Name} from ${item.ModulePath};`);
   }
 }
 
@@ -142,10 +165,9 @@ function emit_declaration_function(decl) {
   //         , IsAsync: boolean
   //         }
   // FunctionSignature is { Kind: 'FunctionSignature', FormalParameters: [string...] };
-  nl_emit('');
-  nl_emit(decl.Exported ? 'export ' : '');
+  emit(decl.Exported ? 'export ' : '');
   emit(decl.IsAsync ? 'async ' : '');
-  emit('function ');
+  emit(lang.fn + ' ');
   emit(decl.Name);
   emit_list_of_names('(', decl.Signature.FormalParameters, ') ');
   emit_statement_block(decl.Body);
@@ -153,7 +175,7 @@ function emit_declaration_function(decl) {
 
 function emit_declaration_variable(decl) {
   // decl is           { Tag: 'Variable', Keyword, Variable, Initializer, Exported }
-  nl_emit(`${decl.Exported ? 'export ' : ''}${decl.Keyword} ${decl.Variable}`);
+  emit(`${decl.Exported ? 'export ' : ''}${decl.Keyword} ${decl.Variable}`);
   if (isJust(decl.Initializer)) {
     emit(' = ');
     emit_expression(decl.Initializer.Just);
@@ -167,7 +189,7 @@ function emit_declaration_variables(decl) {
   // Variables   is   [string...]
   // Initializer is   Expression
   // Exported    is   boolean
-  nl_emit(`${decl.Exported ? 'export ' : ''}${decl.Keyword} `);
+  emit(`${decl.Exported ? 'export ' : ''}${decl.Keyword} `);
   emit_list_of_names('[', decl.Variables, ']');
   emit(' = ');
   emit_expression(decl.Initializer);
@@ -183,7 +205,7 @@ function emit_statement(stmt) {
   //      or { Kind: 'Statement', Tag: 'Expression', Expression };
   //      or { Kind: 'Statement', Tag: 'Block', Declarations };
   if (stmt.Tag === 'If') {
-    emit_statement_if(stmt);
+    lang.emit_if_stmt(stmt);
   } else if (stmt.Tag === 'While') {
     emit_statement_while(stmt);
   } else if (stmt.Tag === 'For') {
@@ -201,9 +223,25 @@ function emit_statement(stmt) {
   }
 }
 
-function emit_statement_if(stmt) {
+function emit_statement_block(body) {
+  // body is { Kind: 'Statement', Tag: 'Block', Declarations: [Declaration...] }
+  emit(lang['do']);
+  emit_statement_list(body.Declarations);
+  nl_emit(lang['end']);
+}
+
+function emit_statement_list(stmt_list) {
+  indent('  ');
+  for (let decl of stmt_list) {
+    nl();
+    emit_declaration(decl);
+  }
+  undent();
+}
+
+function js_emit_statement_if(stmt) {
   // stmt is { Kind: 'Statement', Tag: 'If', Test: Expression, Body: Statement/Block, Else: Maybe(Statement) };
-  nl_emit('if (');
+  emit('if (');
   emit_expression(stmt.Test);
   emit(') ');
   emit_statement_block(stmt.Body);
@@ -213,9 +251,33 @@ function emit_statement_if(stmt) {
   }
 }
 
+function sp1_emit_statement_if(stmt) {
+  emit('if ');
+  emit_expression(stmt.Test);
+  emit(' then');
+  emit_statement_list(stmt.Body.Declarations);
+  stmt = stmt.Else;
+  while (isJust(stmt)) {
+    stmt = stmt.Just;
+    if (stmt.Kind === 'Statement' && stmt.Tag === 'If') {
+      nl_emit('elsif ');
+      emit_expression(stmt.Test);
+      emit(' then');
+      emit_statement_list(stmt.Body.Declarations);
+      stmt = stmt.Else;
+    } else if (stmt.Kind === 'Statement' && stmt.Tag === 'Block') {
+      nl_emit('else');
+      emit_statement_list(stmt.Declarations);
+      nl_emit('end');
+      return;
+    }
+  }
+  nl_emit('end');
+}
+
 function emit_statement_while(stmt) {
   // stmt is { Kind: 'Statement', Tag: 'While', Test, Body };
-  nl_emit('while (');
+  emit('while (');
   emit_expression(stmt.Test);
   emit(') ');
   emit_statement_block(stmt.Body);
@@ -227,7 +289,7 @@ function emit_statement_for(stmt) {
   // Vars       is [string...]
   // Collection is Expression
   // Body       is Statement/Block
-  nl_emit('for (');
+  emit('for (');
   if (stmt.Keyword !== null) {
     emit(stmt.Keyword + ' ');
   }
@@ -242,14 +304,14 @@ function emit_statement_for(stmt) {
 function emit_statement_throw(stmt) {
   // stmt      is { Kind: 'Statement', Tag: 'Throw', Expression };
   // Exception is Expression
-  nl_emit('throw ');
+  emit('throw ');
   emit_expression(stmt.Expression);
   emit(';');
 }
 
 function emit_statement_return(stmt) {
   // stmt is { Kind: 'Statement', Tag: 'Return', Expression: Maybe(Expression) };
-  nl_emit('return');
+  emit('return');
   if (isJust(stmt.Expression)) {
     emit(' ');
     emit_expression(stmt.Expression.Just);
@@ -257,19 +319,7 @@ function emit_statement_return(stmt) {
   emit(';');
 }
 
-function emit_statement_block(body) {
-  // body is { Kind: 'Statement', Tag: 'Block', Declarations: [Declaration...] }
-  emit('{');
-  indent('  ');
-  for (let decl of body.Declarations) {
-    emit_declaration(decl);
-  }
-  undent();
-  nl_emit('}');
-}
-
 function emit_statement_expression(stmt) {
-  nl_emit('');
   emit_expression(stmt.Expression);
   emit(';');
 }
@@ -489,7 +539,7 @@ function emit_literal_function(fn) {
   // Body              is Statement/Block
   // FunctionSignature is { Kind: 'FunctionSignature', Tag: 'FunctionSignature', FormalParameters };
   // FormalParameters  is [string...]
-  emit('function ');
+  emit(lang.fn + ' ');
   if (fn.Name !== '') {
     emit(fn.Name);
   }

@@ -9,7 +9,7 @@ while true; do
     clear
     echo '===== Running unit tests =====' && npm test && \
       echo '===== Running test scripts =====' && node cmd/run-tests.mjs && \
-      echo '===== Compiling {src,cmd}/*.mjs =====' && node cmd/sjs-to-js.mjs --verbose src/*.mjs cmd/*.mjs
+      echo '===== Compiling {src,cmd}/*.mjs =====' && node cmd/prism.mjs --verbose src/*.mjs cmd/*.mjs
     # we only compiled the sources to make sure they don't generate errors; don't keep the output
     find ./cmd ./src ./test -name '*.compiled.mjs' -delete
     touch $LATEST

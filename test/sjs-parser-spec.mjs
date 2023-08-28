@@ -472,7 +472,7 @@ describe("SimpleJS Parser", function () {
       'test/resources/test-01.sjs',
       'test/resources/test-03.sjs',
       'test/resources/test-02.sjs',
-      'cmd/sjs-to-js.mjs',
+      'cmd/prism.mjs',
       // 'src/run-tests.mjs',  /* contains `async` and `await`
       'src/sjs-lexer.mjs',
       'test/sjs-lexer-spec.mjs',

@@ -62,7 +62,7 @@ function run_program(program, argv) {
   return new Promise((resolve, reject) => {
     child.on('exit', (code) => {
       if (code !== 0) {
-        reject(new Error(`Script failed with exit code ${code}`));
+        reject(new Error(`'${program} ${argv}' failed with exit code ${code}`));
       } else {
         resolve({status: code, stdout, stderr});
       }
@@ -76,7 +76,7 @@ async function run_test(script_filename) {
   let output_filename = script_filename.replace(extension, '.compiled.mjs');
 
   // compile
-  let result = await run_program('node', ['cmd/sjs-to-js.mjs', script_filename]);
+  let result = await run_program('node', ['cmd/prism.mjs', script_filename]);
   if (result.status !== 0) {
     console.error(`  Failed to compile ${script_filename}`);
     return false;
