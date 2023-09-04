@@ -4,14 +4,14 @@ import { Generate  } from "../src/emit-js.mjs";
 import * as fs from 'fs';
 
 let Verbose = false;
-let TargetLanguage = 'js';
+let OutputLanguage = 'js';
+let InputLanguage = 'sjs';
 
 function transpile_from_string(input_filename, input_text, writer) {
-  let parser = NewParser(NewLexer(input_text));
 //console.log("Parsing...");
-  let unit = Parse(NewParser(NewLexer(input_text)));
+  let unit = Parse(NewParser(InputLanguage, NewLexer(InputLanguage, input_text)));
   if (unit.Tag == 'Just') { //console.log("Generating...");
-    Generate(TargetLanguage, input_filename, unit.Just, writer);
+    Generate(OutputLanguage, input_filename, unit.Just, writer);
   } else {
     console.error("Failed");
   }
@@ -19,7 +19,7 @@ function transpile_from_string(input_filename, input_text, writer) {
 
 function generate_output_filename(input_filename, output_dirname) {
   let extensionMatcher = new RegExp('[.][^.]*$|$');
-  let outputExtension = TargetLanguage === 'js' ? '.mjs' : '.sp1';
+  let outputExtension = OutputLanguage === 'js' ? '.mjs' : '.sp1';
 
   if (output_dirname === '') {
     // output name is input name with extension changed to `.compiled.{mjs,js}`
@@ -33,6 +33,13 @@ function generate_output_filename(input_filename, output_dirname) {
 }
 
 function transpile_filename(input_filename, output_dirname) {
+  if (/[.][ms]?js$/.test(input_filename)) {
+    InputLanguage = 'sjs';
+  } else if (/[.]sp1$/.test(input_filename)) {
+    InputLanguage = 'sp1';
+  } else {
+    usage_error(`filename extension unrecognized in '${input_filename}'`);
+  }
   if (Verbose) {
     console.log(input_filename);
   }
@@ -53,8 +60,8 @@ function transpile_filename(input_filename, output_dirname) {
 }
 
 function usage() {
-  console.error(`usage: node prism [--out-dir=...] [--target-language=(js|sp1)] filename...`);
-  console.error(`  output filename will be *.mjs or *.sp1, depending on --target-language`);
+  console.error(`usage: node prism [--out-dir=...] [--output-language=(js|sp1)] filename...`);
+  console.error(`  output filename will be *.mjs or *.sp1, depending on --output-language`);
   console.error(`  if no --out-dir is given, output filename will be *.compiled.{mjs,sp1}`);
 }
 
@@ -82,10 +89,10 @@ function main() {
     let m;
     if (m = arg.match(/^--out-dir=(?<dir>.*)$/)) {
       output_dirname = m.groups.dir;
-    } else if (m = arg.match(/^--target-language=(?<lang>.*)$/)) {
-      TargetLanguage = m.groups.lang;
-      if (TargetLanguage !== 'js' && TargetLanguage !== 'sp1') {
-        usage_error(`--target-language: language '${TargetLanguage}' is not supported`);
+    } else if (m = arg.match(/^--output-language=(?<lang>.*)$/)) {
+      OutputLanguage = m.groups.lang;
+      if (OutputLanguage !== 'js' && OutputLanguage !== 'sp1') {
+        usage_error(`--output-language: language '${OutputLanguage}' is not supported`);
       }
     } else if (/^(-v|--verbose)$/.test(arg)) {
       Verbose = true;

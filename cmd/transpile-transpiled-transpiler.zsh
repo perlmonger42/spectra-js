@@ -6,32 +6,60 @@ TMPDIR=$(mktemp -d /tmp/prism.XXXXXX)
 rm -f ./**/*.compiled.*
 tree --gitignore .
 
-# compile all sjs source code into sp1 code in $TMPDIR/sp1
-echo "===== Transpiling sjs to tmp/sp1 ====="
-for SUBDIR in cmd src 'test' 'test/resources'; do
-  mkdir -p $TMPDIR/sp1/$SUBDIR
-  node cmd/prism.mjs --verbose --target-language=sp1 --out-dir=$TMPDIR/sp1/$SUBDIR ./$SUBDIR/*.[ms]js
+
+### use original transpiler to transpile original sjs => spectra => sjs
+
+# compile all original sjs source code into in tmp/1_sp/**/*.sp1
+echo "===== Use original transpiler to transpile original/**/*.mjs into tmp/1_sp/**/*.sp1 ====="
+for SUBDIR in 'cmd' 'src' 'test' 'test/resources'; do
+  mkdir -p $TMPDIR/1_sp/$SUBDIR
+  node cmd/prism.mjs --verbose --output-language=sp1 --out-dir=$TMPDIR/1_sp/$SUBDIR ./$SUBDIR/*.[ms]js
 done
-tree --gitignore $TMPDIR/sp1
+tree --gitignore $TMPDIR/1_sp
 
-
-# compile most sp1 source code (but not test/resources) into js code in $TMPDIR/js
-echo "===== Transpiling sp1 to tmp/js directory ====="
-for SUBDIR in cmd src 'test'; do
-  mkdir -p $TMPDIR/js/$SUBDIR
-  node cmd/prism.mjs --verbose --target-language=sp1 --out-dir=$TMPDIR/js/$SUBDIR $TMPDIR/sp1/$SUBDIR/*.sp1
+# compile all spectra source code in tmp/1_sp into js code in tmp/2_js
+echo "===== Use original transpiler to transpile tmp/1_sp/**/*.sp1 into tmp/2_js/**/*.mjs ====="
+for SUBDIR in 'cmd' 'src' 'test' 'test/resources'; do
+  mkdir -p $TMPDIR/2_js/$SUBDIR
+  node cmd/prism.mjs --verbose --output-language=js --out-dir=$TMPDIR/2_js/$SUBDIR $TMPDIR/1_sp/$SUBDIR/*.sp1
 done
-mkdir -p $TMPDIR/js/test/resources
-cp "$TMPDIR/sp1/test/resources/*.sp1" "$TMPDIR/js/test/resources"
-tree --gitignore $TMPDIR/js
+# copy additional resources into $TMPDIR/2_js
+cp package.json .gitignore $TMPDIR/2_js
+tree --gitignore $TMPDIR/2_js
 
-# copy additional resources into $TMPDIR/js
-cp package.json .gitignore $TMPDIR/js
 
-# test the transpiled version of the transpiler
-cd $TMPDIR/js
+### test transpiled transpiler
+cd $TMPDIR/2_js
 npm install
+echo "===== Testing transpiled transpiler in tmp/2_js ====="
+npm test && node cmd/run-tests.mjs && node cmd/prism.mjs --verbose src/*.mjs cmd/*.mjs
+
+
+### use tmp/2_js transpiler to transpile tmp/2_js sjs => spectra => sjs
+
+# compile all tmp/2_js source code into tmp/3_sp/**/*.sp1
+echo "===== Use tmp/2_js transpiler to transpile tmp/2_js/**/*.mjs into tmp/3_sp/**/*.sp1 ====="
+for SUBDIR in 'cmd' 'src' 'test' 'test/resources'; do
+  mkdir -p $TMPDIR/3_sp/$SUBDIR
+  node cmd/prism.mjs --verbose --output-language=sp1 --out-dir=$TMPDIR/3_sp/$SUBDIR ./$SUBDIR/*.[ms]js
+done
+tree --gitignore $TMPDIR/3_sp
+
+# compile all spectra source code in tmp/3_sp into js code in tmp/4_js
+echo "===== Use tmp/2_js transpiler to transpile /tmp/3_js/**/*.sp1 into tmp/4_js/**/*.mjs ====="
+for SUBDIR in 'cmd' 'src' 'test' 'test/resources'; do
+  mkdir -p $TMPDIR/4_js/$SUBDIR
+  node cmd/prism.mjs --verbose --output-language=js --out-dir=$TMPDIR/4_js/$SUBDIR $TMPDIR/3_sp/$SUBDIR/*.sp1
+done
+# copy additional resources into $TMPDIR/4_js
+cp package.json .gitignore $TMPDIR/4_js
+tree --gitignore $TMPDIR/4_js
+
+
+# test the doubly-transpiled version of the transpiler
 echo "===== Testing transpiled transpiler ====="
+cd $TMPDIR/4_js
+npm install
 npm test && node cmd/run-tests.mjs && node cmd/prism.mjs --verbose src/*.mjs cmd/*.mjs
 
 tree --gitignore $TMPDIR

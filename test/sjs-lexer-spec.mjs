@@ -5,34 +5,38 @@ function match(token, kind, text) {
   expect(token.slice(0,2)).to.have.ordered.members([kind, text]);
 }
 
+function SjsLexer(text) {
+  return NewLexer('sjs', text);
+}
+
 describe("SimpleJS Lexer", function () {
 
   it("should return EOF immediately on an empty string", function () {
-    var lexer = NewLexer("");
+    var lexer = SjsLexer("");
     expect(NextItem(lexer, true)).to.deep.equal(['EOF', '', 1, 1, 0]);
   });
 
   describe("should scan regular expressions", function () {
     it("simple", function () {
-      var lexer = NewLexer("/blah/");
+      var lexer = SjsLexer("/blah/");
       expect(NextItem(lexer, true)).to.deep.equal(['REGEXP', '/blah/', 1, 1, 0]);
     });
     it("with flags", function () {
-      var lexer = NewLexer("/x/gi");
+      var lexer = SjsLexer("/x/gi");
       expect(NextItem(lexer, true)).to.deep.equal(['REGEXP', '/x/gi', 1, 1, 0]);
     });
     it("with escaped slash", function () {
-      var lexer = NewLexer("/\\//ms");
+      var lexer = SjsLexer("/\\//ms");
       expect(NextItem(lexer, true)).to.deep.equal(['REGEXP', '/\\//ms', 1, 1, 0]);
     });
     it("with class", function () {
-      var lexer = NewLexer("/[a-z/]*/g");
+      var lexer = SjsLexer("/[a-z/]*/g");
       expect(NextItem(lexer, true)).to.deep.equal(['REGEXP', '/[a-z/]*/g', 1, 1, 0]);
     });
   });
 
   it("should handle whitespace and newlines properly", function () {
-    var lexer = NewLexer(" \t\v \n \n\r\n   \n");
+    var lexer = SjsLexer(" \t\v \n \n\r\n   \n");
     expect(NextItem(lexer, true)).to.deep.equal(['WHITESPACE', ' \t\v ', 1, 1, 0]);
     expect(NextItem(lexer, true)).to.deep.equal(['NEWLINE', '\n', 1, 5, 4]);
     expect(NextItem(lexer, true)).to.deep.equal(['WHITESPACE', ' ', 2, 1, 5]);
@@ -45,7 +49,7 @@ describe("SimpleJS Lexer", function () {
 
   describe("should compute correct positions with newlines in tokens", function () {
     it("which happens with block comments", function () {
-      var lexer = NewLexer("1 /*\n*/ 2");
+      var lexer = SjsLexer("1 /*\n*/ 2");
       expect(NextItem(lexer, true)).to.deep.equal(['FIXNUM', '1', 1, 1, 0]);
       expect(NextItem(lexer, true)).to.deep.equal(['WHITESPACE', ' ', 1, 2, 1]);
       expect(NextItem(lexer, true)).to.deep.equal(['BLOCK_COMMENT', '/*\n*/', 1, 3, 2]);
@@ -53,7 +57,7 @@ describe("SimpleJS Lexer", function () {
       expect(NextItem(lexer, true)).to.deep.equal(['FIXNUM', '2', 2, 4, 8]);
     });
     it("which happens with back-quoted strings", function () {
-      var lexer = NewLexer("3`a\nb\nc`4");
+      var lexer = SjsLexer("3`a\nb\nc`4");
       expect(NextItem(lexer, true)).to.deep.equal(['FIXNUM', '3', 1, 1, 0]);
       expect(NextItem(lexer, true)).to.deep.equal(['STRING', '`a\nb\nc`', 1, 2, 1]);
       expect(NextItem(lexer, true)).to.deep.equal(['FIXNUM', '4', 3, 3, 8]);
@@ -62,7 +66,7 @@ describe("SimpleJS Lexer", function () {
 
   describe("should recognize identifiers", function () {
     var token;
-    var lexer = NewLexer("a bc");
+    var lexer = SjsLexer("a bc");
     beforeEach(function () { token = NextItem(lexer, true); });
     it("should be symbol 'a'", function () {
       expect(token).to.deep.equal(['SYMBOL', 'a', 1, 1, 0]);
@@ -77,7 +81,7 @@ describe("SimpleJS Lexer", function () {
 
   describe("should recognize skip-whitespace parameter", function () {
     var token;
-    var lexer = NewLexer("a bc");
+    var lexer = SjsLexer("a bc");
     beforeEach(function () { token = NextItem(lexer, false); });
     it("should be symbol 'a'", function () {
       match(token, 'SYMBOL', 'a');
@@ -89,7 +93,7 @@ describe("SimpleJS Lexer", function () {
 
   describe("should recognize punctuation", function () {
     var token;
-    var lexer = NewLexer("(){}[];=====!==!= <= < >= > =");
+    var lexer = SjsLexer("(){}[];=====!==!= <= < >= > =");
     beforeEach(function () { token = NextItem(lexer, false); });
     it("should be a open parenthesis", function () {
       expect(token).to.deep.equal(['LPAREN', '(', 1, 1, 0]);
@@ -141,19 +145,41 @@ describe("SimpleJS Lexer", function () {
     });
   });
 
-  describe("should recognize keywords", function () {
-    var text = "do else end if function import module then let export";
+  describe("should recognize Spectra keywords", function () {
+    var text = "do blah end fn elsif";
     var token;
-    var lexer = NewLexer(text);
+    var lexer = NewLexer('sp1', text);
     beforeEach(function () { token = NextItem(lexer, false); });
     it("should be `do`", function () {
       expect(token).to.deep.equal(['do', 'do', 1, 1, 0]);
     });
-    it("should be `else`", function () {
-      expect(token).to.deep.equal(['else', 'else', 1, 4, 3]);
+    it("should be `blah`", function () {
+      expect(token).to.deep.equal(['SYMBOL', 'blah', 1, 4, 3]);
     });
     it("should be `end`", function () {
       expect(token).to.deep.equal(['end', 'end', 1, 9, 8]);
+    });
+    it("should be `fn`", function () {
+      expect(token).to.deep.equal(['fn', 'fn', 1, 13, 12]);
+    });
+    it("should be `elsif`", function () {
+      expect(token).to.deep.equal(['elsif', 'elsif', 1, 16, 15]);
+    });
+  });
+
+  describe("should recognize SimpleJavaScript keywords", function () {
+    var text = "do else end if function import module then let export fn elsif";
+    var token;
+    var lexer = SjsLexer(text);
+    beforeEach(function () { token = NextItem(lexer, false); });
+    it("should be SYMBOL `do`", function () {
+      expect(token).to.deep.equal(['SYMBOL', 'do', 1, 1, 0]);
+    });
+    it("should be `else`", function () {
+      expect(token).to.deep.equal(['else', 'else', 1, 4, 3]);
+    });
+    it("should be SYMBOL `end`", function () {
+      expect(token).to.deep.equal(['SYMBOL', 'end', 1, 9, 8]);
     });
     it("should be `if`", function () {
       expect(token).to.deep.equal(['if', 'if', 1, 13, 12]);
@@ -176,14 +202,20 @@ describe("SimpleJS Lexer", function () {
     it("should be `export`", function () {
       expect(token).to.deep.equal(['export', 'export', 1, 48, 47]);
     });
+    it("should be SYMBOL `fn`", function () {
+      expect(token).to.deep.equal(['SYMBOL', 'fn', 1, 55, 54]);
+    });
+    it("should be SYMBOL `elsif`", function () {
+      expect(token).to.deep.equal(['SYMBOL', 'elsif', 1, 58, 57]);
+    });
     it("should be EOF", function () {
-      expect(token).to.deep.equal(['EOF', '', 1, 54, 53]);
+      expect(token).to.deep.equal(['EOF', '', 1, 63, 62]);
     });
   });
 
   describe('token variety in: \'(a!) "hello, world""unfinished\\nline"\'', function () {
     var token;
-    var lexer = NewLexer('(a!) "hello, world""unfinished\nline"');
+    var lexer = SjsLexer('(a!) "hello, world""unfinished\nline"');
     beforeEach(function () { token = NextItem(lexer, true); });
     it("next is open parenthesis", function () {
       match(token, 'LPAREN', '(');
@@ -222,17 +254,17 @@ describe("SimpleJS Lexer", function () {
 
   describe('newline in strings', function () {
     it("double-quoted strings should not span lines", function () {
-      let lexer = NewLexer('"stuff\nand\nnonsense"');
+      let lexer = SjsLexer('"stuff\nand\nnonsense"');
       let token = NextItem(lexer, true);
       match(token, 'BADSTRING', '"stuff');
     });
     it("single-quoted strings should not span lines", function () {
-      let lexer = NewLexer("'stuff\nand\nnonsense'");
+      let lexer = SjsLexer("'stuff\nand\nnonsense'");
       let token = NextItem(lexer, true);
       match(token, 'BADSTRING', "'stuff");
     });
     it("back-quoted strings may span lines", function () {
-      let lexer = NewLexer('`stuff\nand\nnonsense`');
+      let lexer = SjsLexer('`stuff\nand\nnonsense`');
       let token = NextItem(lexer, true);
       match(token, 'STRING', '`stuff\nand\nnonsense`');
     });
@@ -240,17 +272,17 @@ describe("SimpleJS Lexer", function () {
 
   describe('strings should be terminated', function () {
     it("double-quoted strings should end with double-quote", function () {
-      let lexer = NewLexer('"stuff');
+      let lexer = SjsLexer('"stuff');
       let token = NextItem(lexer, true);
       match(token, 'BADSTRING', '"stuff');
     });
     it("single-quoted strings should end with single-quote", function () {
-      let lexer = NewLexer("'stuff");
+      let lexer = SjsLexer("'stuff");
       let token = NextItem(lexer, true);
       match(token, 'BADSTRING', "'stuff");
     });
     it("back-quoted strings should end with back-quote", function () {
-      let lexer = NewLexer('`stuff\nand\nnonsense');
+      let lexer = SjsLexer('`stuff\nand\nnonsense');
       let token = NextItem(lexer, true);
       match(token, 'BADSTRING', '`stuff');
     });

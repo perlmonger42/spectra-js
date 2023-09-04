@@ -64,16 +64,27 @@ function maybe_nl_emit(should_newline, text) {
   }
 }
 
-export function Generate(target_language, input_file_name, unit, writer) {
-  emitter = { target_language
+function is_sp_keyword(text) {
+  return /^(as|async|await|const|do|else|elsif|end|export|if|fn|for|from|import|let|module|new|of|return|then|throw|typeof|var|while)$/.test(text);
+}
+
+function is_js_keyword(text) {
+  return /^(as|async|await|const|else|export|if|for|from|import|let|module|new|of|return|then|throw|typeof|var|while)$/.test(text);
+}
+
+export function Generate(output_language, input_file_name, unit, writer) {
+  emitter = { output_language
             , writer, current_indent: '', indent_stack: [ ]
             , current_line: 1, current_column: 1
             };
   lang = {
-    fn: target_language === 'js' ? 'function' : 'fn',
-    'do': target_language === 'js' ? '{' : 'do',
-    'end': target_language === 'js' ? '}' : 'end',
-    emit_if_stmt: target_language === 'js' ? js_emit_statement_if : sp1_emit_statement_if,
+    func: output_language === 'js' ? 'function' : 'fn',
+    begin_block: output_language === 'js' ? '{' : 'do',
+    end_block: output_language === 'js' ? '}' : 'end',
+    emit_if_stmt: output_language === 'js' ? js_emit_statement_if : sp1_emit_statement_if,
+    test_lpar: output_language === 'js' ? '(' : '',
+    test_rpar: output_language === 'js' ? ')' : '',
+    is_keyword: output_language === 'js' ? is_js_keyword : is_sp_keyword,
   };
   emit_unit(unit);
 }
@@ -87,7 +98,7 @@ function nyi(message) {
 }
 
 function emit_unit(unit) {
-  // unit is               { Kind: 'Unit', Tag: 'Unit', Module, ImportList, DeclarationList };
+  // unit is               { Kind: 'Unit', Tag: 'Unit', Module, ImportList, DeclarationList, ExpectedOutput };
   // Module is             Maybe(ModuleName)
   // ModuleName is         { Kind: 'ModuleName', Tag: 'ModuleName', Name: string }
   // ImportList is         [ Import... ]
@@ -108,6 +119,7 @@ function emit_unit(unit) {
     emit_declaration(decl);
   }
   emit('\n');
+  emit(unit.ExpectedOutput);
 }
 
 function emit_import(item) {
@@ -167,7 +179,7 @@ function emit_declaration_function(decl) {
   // FunctionSignature is { Kind: 'FunctionSignature', FormalParameters: [string...] };
   emit(decl.Exported ? 'export ' : '');
   emit(decl.IsAsync ? 'async ' : '');
-  emit(lang.fn + ' ');
+  emit(lang.func + ' ');
   emit(decl.Name);
   emit_list_of_names('(', decl.Signature.FormalParameters, ') ');
   emit_statement_block(decl.Body);
@@ -225,9 +237,9 @@ function emit_statement(stmt) {
 
 function emit_statement_block(body) {
   // body is { Kind: 'Statement', Tag: 'Block', Declarations: [Declaration...] }
-  emit(lang['do']);
+  emit(lang.begin_block);
   emit_statement_list(body.Declarations);
-  nl_emit(lang['end']);
+  nl_emit(lang.end_block);
 }
 
 function emit_statement_list(stmt_list) {
@@ -277,9 +289,9 @@ function sp1_emit_statement_if(stmt) {
 
 function emit_statement_while(stmt) {
   // stmt is { Kind: 'Statement', Tag: 'While', Test, Body };
-  emit('while (');
+  emit(`while ${lang.test_lpar}`);
   emit_expression(stmt.Test);
-  emit(') ');
+  emit(`${lang.test_rpar} `);
   emit_statement_block(stmt.Body);
 }
 
@@ -289,7 +301,7 @@ function emit_statement_for(stmt) {
   // Vars       is [string...]
   // Collection is Expression
   // Body       is Statement/Block
-  emit('for (');
+  emit(`for ${lang.test_lpar}`);
   if (stmt.Keyword !== null) {
     emit(stmt.Keyword + ' ');
   }
@@ -297,7 +309,7 @@ function emit_statement_for(stmt) {
   emit_list_of_names(l, stmt.Vars, r);
   emit(' of ');
   emit_expression(stmt.Collection);
-  emit(') ');
+  emit(`${lang.test_rpar} `);
   emit_statement_block(stmt.Body);
 }
 
@@ -498,12 +510,20 @@ function emit_expression_array(expr) {
   }
 }
 
+function emit_key(expr) {
+  if (expr.Tag === 'Symbol' && lang.is_keyword(expr.Name)) {
+    emit(`'${expr.Name}'`);
+  } else {
+    emit_expression(expr);
+  }
+}
+
 function emit_pair(pair) {
   // pair is { Kind: 'Expression', Tag: 'Pair', Key, Value: Expression };
   // key  is { Kind: 'Expression', Tag: 'Symbol', Name }
   //      or { Kind: 'Expression', Tag: 'Literal', Literal: Literal/String }
   // Literal/String is { Kind: 'Literal', Tag:  'String', Value: string, Text: string };
-  emit_expression(pair.Key);
+  emit_key(pair.Key);
   if (isJust(pair.Value)) {
     emit(': ');
     emit_expression(pair.Value.Just);
@@ -533,18 +553,18 @@ function emit_list_of_names(prefix, names, postfix) {
 }
 
 
-function emit_literal_function(fn) {
-  // fn                is { Kind: 'Literal', Tag: 'Function', Name: string, Signature, Body };
+function emit_literal_function(func) {
+  // func              is { Kind: 'Literal', Tag: 'Function', Name: string, Signature, Body };
   // Signature         is FunctionSignature
   // Body              is Statement/Block
   // FunctionSignature is { Kind: 'FunctionSignature', Tag: 'FunctionSignature', FormalParameters };
   // FormalParameters  is [string...]
-  emit(lang.fn + ' ');
-  if (fn.Name !== '') {
-    emit(fn.Name);
+  emit(lang.func + ' ');
+  if (func.Name !== '') {
+    emit(func.Name);
   }
-  emit_list_of_names('(', fn.Signature.FormalParameters, ')');
-  emit_statement_block(fn.Body);
+  emit_list_of_names('(', func.Signature.FormalParameters, ')');
+  emit_statement_block(func.Body);
 }
 
 function precedence(expr) {

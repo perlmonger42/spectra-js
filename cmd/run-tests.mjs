@@ -4,7 +4,7 @@ import { describe } from '../src/sjs-parser.mjs';
 import * as fs from 'fs';
 
 const TestDirectory = "./test/resources";
-const TestFiles = TestDirectory + "/*.{sjs,mjs,js}";
+const TestFiles = TestDirectory + "/*.{sjs,mjs,js,sp1}";
 const IgnoreFiles = {
         ignore: {
           ignored: (p) => /\.compiled.mjs$/.test(p.name)
