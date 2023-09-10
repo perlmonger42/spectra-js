@@ -1,15 +1,16 @@
 import { NextItem } from "./sjs-lexer.mjs";
 
-// Tokens are arrays with this format:
-//   [KIND, TEXT, LINE, COLUMN, CHARACTER_OFFSET]
-// KIND and TEXT are Strings (e.g., "SYMBOL" and "xyz").
-// LINE, COLUMN, and CHARACTER_OFFSET are Integers.
+// Tokens are objects with this format:
+//   { Kind: 'Token', Type: string, Text: string, Line: integer, Column: integer, Offset: integer }
+// Type is the kind of token, e.g. "SYMBOL" or "PLUS".
+// Text is the spelling of the token, e.g. "fred" or "+".
+// Line and Column are 1-based, and give the position of the token's first character.
+// Offset is 0-based, and gives the same position in bytes relative to the
+// beginning of the source code.
 //
-// LINE and COLUMN are 1-based; CHARACTER_OFFSET is 0-based.
-//
-// KIND and TEXT are identical for keywords (e.g., "if" and "if").  For all
+// Type and Text are identical for keywords (e.g., "if" and "if").  For all
 // other kinds of token, they are typically different (e.g., "FIXNUM" and
-// "42").  The KIND represents the class of token and TEXT is its spelling.
+// "42").
 
 export function NewParser(language, lexer) {
   let is_spectra = language === 'sp1';
@@ -30,18 +31,9 @@ export function NewParser(language, lexer) {
   return parser;
 }
 
-// tokenToText(token) prints the token
-function tokenToText(token) {
-  if (token === null) {
-    return "<null (token is missing)>";
-  }
-  return `{kind: ${token[0]}, text: "${token[1]}", line: ${token[2]}, ` +
-         `column: ${token[3]}, offset: ${token[4]}}`;
-}
-
 // showToken(token) prints the token
 function showToken(token) {
-  console.log(tokenToText(token));
+  console.log(describe(token));
 }
 
 // showCurrentToken() prints the current token
@@ -225,18 +217,14 @@ export function assert_is_string_match(value_name, value, regex) {
 }
 
 export function assert_is_token(value_name, value, kind_regex) {
-  // token is [KIND, TEXT, LINE, COLUMN, CHARACTER_OFFSET]
-  assert_is_list(value_name, value);
-  if (value.length !== 5) {
-    throw new InternalError(`${value_name} should have 5 elements; it is  ${describe_value(value)}`);
-  }
-  assert_is_string(`${value_name}[0]`, value[0]);
-  assert_is_string(`${value_name}[1]`, value[1]);
-  assert_is_number(`${value_name}[2]`, value[2]);
-  assert_is_number(`${value_name}[3]`, value[2]);
-  assert_is_number(`${value_name}[4]`, value[2]);
-  if (!kind_regex.test(value[0])) {
-    throw new InternalError(`${value_name}[0] does not match ${kind_regex}; it is ${describe_value(value[0])}`);
+  assert_is_kind(value_name, value, 'Token');
+  assert_is_string(`${value_name}.Type`, value.type);
+  assert_is_string(`${value_name}.Text`, value.Text);
+  assert_is_number(`${value_name}.Line`, value.Line);
+  assert_is_number(`${value_name}.Column`, value.Column);
+  assert_is_number(`${value_name}.Offset`, value.Offset);
+  if (!kind_regex.test(value.Type)) {
+    throw new InternalError(`${value_name}.Type does not match ${kind_regex}; it is ${describe_value(value.Type)}`);
   }
 }
 
@@ -319,9 +307,9 @@ export function assert_is_kind_tag(value_name, value, kind, tag) {
 }
 
 function NewSyntaxError(message, token) {
-  let name = token[0] === token[1] ? token[0] : `${token[0]} (\`${token[1]}\`)`;
-  let line = token[2];
-  let column = token[3];
+  let name = token.Type === token.Text ? token.Type : `${token.Type} (\`${token.Text}\`)`;
+  let line = token.Line;
+  let column = token.Column;
   return SyntaxError(`${message}; found ${name} at line ${line} column ${column}`);
 }
 
@@ -398,14 +386,14 @@ function curtok(parser) {
   return parser.current_token;
 }
 
-// peek() returns the KIND of the current token, without advancing the input.
+// peek() returns the TYPE of the current token, without advancing the input.
 function peek(parser) {
-  return parser.current_token[0];
+  return parser.current_token.Type;
 }
 
 // text() returns the TEXT of the current token, without advancing the input.
 function text(parser) {
-  return parser.current_token[1];
+  return parser.current_token.Text;
 }
 
 // advance() returns the current token, and makes the next token current.
@@ -474,9 +462,9 @@ function expect(parser, type, message) {
     message = `expected \`${type}\``;
   }
   let token = parser.current_token;
-  let found = token[0] === token[1] ? token[0] : `${token[0]} (\`${token[1]}\`)`;
-  let line = token[2];
-  let column = token[3];
+  let found = token.Type === token.Text ? token.Type : `${token.Type} (\`${token.Text}\`)`;
+  let line = token.Line;
+  let column = token.Column;
   throw new SyntaxError(`${line}:${column}: ${message} but found \`${found}\` at line ${line} column ${column}`);
 }
 
@@ -489,7 +477,7 @@ function identifier_list(parser) {
     if (!identifier) {
       break;  // throw NewSyntaxError("expected IDENTIFIER", curtok(parser));
     }
-    identifier_list.push(identifier[1]);
+    identifier_list.push(identifier.Text);
     if (!skip(parser, 'COMMA')) {
       break;
     }
@@ -640,9 +628,9 @@ function object_constructor(parser) {
     let tok = curtok(parser);
     let key;
     if (skip(parser, 'SYMBOL')) {
-      key = New_Expression_Symbol(tok[1]);
+      key = New_Expression_Symbol(tok.Text);
     } else if (skip(parser, 'STRING')) {
-      key = New_Expression_Literal(New_Literal_String(parseString(tok[1]), tok[1]));
+      key = New_Expression_Literal(New_Literal_String(parseString(tok.Text), tok.Text));
     } else {
       expect(parser, 'SYMBOL', 'expected SYMBOL or STRING (as object key)');
     }
@@ -688,10 +676,10 @@ function array_constructor(parser) {
 function function_literal(parser) {
   // function_literal := function_kw SYMBOL? '(' identifier_list? ')' body
   expect(parser, parser.function_kw);
-  let name = skip(parser, 'SYMBOL') || ['SYMBOL', ''];
+  let name = skip(parser, 'SYMBOL') || { Type: 'SYMBOL', Text: ''};
   let signature = function_signature(parser);
   let body = statement_block(parser, "at start of function body");
-  return New_Literal_Function(name[1], signature, body);
+  return New_Literal_Function(name.Text, signature, body);
 }
 
 function peek_block(parser) {
@@ -726,7 +714,7 @@ function constructor_call(parser) {
   // constructor_call := 'new' SYMBOL '(' argument_list ')'
   expect(parser, 'new');
   let constructorToken = expect(parser, 'SYMBOL');
-  let symbol = New_Expression_Symbol(constructorToken[1]);
+  let symbol = New_Expression_Symbol(constructorToken.Text);
   if (peek(parser) === 'LPAREN') {
     let args = parenthesized_expression_list(parser, {});
     return New_Expression_Binary('new', symbol, New_Expression_List(args));
@@ -761,7 +749,7 @@ function factor(parser) {
   } else if (match(parser, 'PLUS') || match(parser, 'MINUS') || match(parser, 'NOT')) {
     let op = advance(parser);
     let arg = factor(parser);
-    value = New_Expression_UnaryPrefix(op[1], arg);
+    value = New_Expression_UnaryPrefix(op.Text, arg);
   } else if (match(parser, 'LBRACE')) {
     value = object_constructor(parser);
   } else if (match(parser, 'LBRACK')) {
@@ -800,7 +788,7 @@ function factor(parser) {
       let op = advance(parser);
       let field = skip(parser, 'throw') || skip(parser, 'from') ||
                   skip(parser, 'fn') || expect(parser, 'SYMBOL', "expected SYMBOL after `.`");
-      value = New_Expression_Binary(op[1], value, New_Expression_Symbol(field[1]));
+      value = New_Expression_Binary(op.Text, value, New_Expression_Symbol(field.Text));
     } else if (match(parser, 'LBRACK')) {
       let op = advance(parser);
       let index = expr(parser);
@@ -820,7 +808,7 @@ function postfix_unary(parser) {
   let arg = factor(parser);
   if (match_any(parser, ['INC', 'DEC'])) {
     let op = advance(parser);
-    arg = New_Expression_UnaryPostfix(op[1], arg);
+    arg = New_Expression_UnaryPostfix(op.Text, arg);
   }
   return arg;
 }
@@ -830,7 +818,7 @@ function prefix_unary(parser) {
   if (match_any(parser, ['PLUS', 'MINUS', 'NOT', 'INC', 'DEC', 'typeof', 'await'])) {
     let op = advance(parser);
     let arg = prefix_unary(parser);
-    return New_Expression_UnaryPrefix(op[1], arg);
+    return New_Expression_UnaryPrefix(op.Text, arg);
   }
   return postfix_unary(parser);
 }
@@ -842,7 +830,7 @@ function multiplicative(parser) {
   while (match(parser, 'STAR') || match(parser, 'SLASH')) {
     let op = advance(parser);
     let right = prefix_unary(parser);
-    left = New_Expression_Binary(op[1], left, right);
+    left = New_Expression_Binary(op.Text, left, right);
   }
   // console.log(`multiplicative returning `); console.log(left);
   return left;
@@ -855,7 +843,7 @@ function additive(parser) {
   while (match(parser, 'PLUS') || match(parser, 'MINUS')) {
     let op = advance(parser);
     let right = multiplicative(parser);
-    left = New_Expression_Binary(op[1], left, right);
+    left = New_Expression_Binary(op.Text, left, right);
   }
   // console.log(`additive returning `); console.log(left);
   return left;
@@ -867,7 +855,7 @@ function relational(parser) {
   while (match_any(parser, ['LT', 'GT', 'GEQ', 'LEQ'])) {
     let op = advance(parser);
     let right = additive(parser);
-    left = New_Expression_Binary(op[1], left, right);
+    left = New_Expression_Binary(op.Text, left, right);
   }
   return left;
 }
@@ -878,7 +866,7 @@ function equality(parser) {
   while (match_any(parser, ['IDENTICAL', 'NOTIDENTICAL', 'EQ', 'NEQ'])) {
     let op = advance(parser);
     let right = relational(parser);
-    left = New_Expression_Binary(op[1], left, right);
+    left = New_Expression_Binary(op.Text, left, right);
   }
   return left;
 }
@@ -889,7 +877,7 @@ function conjunction(parser) {
   while (match(parser, 'AND')) {
     let op = advance(parser);
     let right = equality(parser);
-    left = New_Expression_Binary(op[1], left, right);
+    left = New_Expression_Binary(op.Text, left, right);
   }
   return left;
 }
@@ -900,7 +888,7 @@ function disjunction(parser) {
   while (match(parser, 'OR')) {
     let op = advance(parser);
     let right = conjunction(parser);
-    left = New_Expression_Binary(op[1], left, right);
+    left = New_Expression_Binary(op.Text, left, right);
   }
   return left;
 }
@@ -913,7 +901,7 @@ function assignment(parser) {
   if (match(parser, 'ASSIGN')) {
     let op = advance(parser);
     let right = assignment(parser);
-    left = New_Expression_Binary(op[1], left, right);
+    left = New_Expression_Binary(op.Text, left, right);
   } else if (skip(parser, 'QUESTION')) {
     let ifTrue = disjunction(parser);
     expect(parser, 'COLON', "expected `:` after `expr ? expr`");
@@ -929,7 +917,7 @@ function sequence(parser) {
   while (match(parser, 'COMMA')) {
     let op = advance(parser);
     let right = assignment(parser);
-    left = New_Expression_Binary(op[1], left, right);
+    left = New_Expression_Binary(op.Text, left, right);
   }
   return left;
 }
@@ -1117,7 +1105,7 @@ function for_statement(parser) {
     expect(parser, 'RPAREN', "expected `)` after `for (...`");
   }
   let body = statement_block(parser, "after `for (...)`");
-  return New_Statement_For(kw[1], vars, collection, body, !!lbrack);
+  return New_Statement_For(kw.Text, vars, collection, body, !!lbrack);
 }
 
 export function New_Statement_Throw(Expression) {
@@ -1232,7 +1220,7 @@ function function_declaration(parser, exported, is_async) {
   let signature = function_signature(parser);
   //console.log(`after function_signature in function_declaration, at ${showCurrentToken(parser)}`);
   let body = statement_block(parser, "at start of function body");
-  return New_Declaration_Function(name[1], signature, body, !!exported, !!is_async);
+  return New_Declaration_Function(name.Text, signature, body, !!exported, !!is_async);
 }
 
 function variable_declaration(parser, exported) {
@@ -1243,21 +1231,21 @@ function variable_declaration(parser, exported) {
     let variables = identifier_list(parser);
     expect(parser, 'RBRACK');
     let assignOp = expect(parser, 'ASSIGN', "expected '=' after 'let [...]'");
-    if (assignOp[1] !== '=') {
+    if (assignOp.Text !== '=') {
       throw NewSyntaxError("expected '=' after 'let [...]'", assignOp);
     }
     let rhs = expr(parser);
     expect(parser, 'SEMICOLON');
-    return New_Declaration_Variables(kw[1], variables, rhs, !!exported);
+    return New_Declaration_Variables(kw.Text, variables, rhs, !!exported);
   }
 
   let lhs = expect(parser, 'SYMBOL');
   let rhs = None('Expression');
-  if (text(parser) === '=' && expect(parser, 'ASSIGN', `expected '=' or ';' after '${kw[1]}'`)) {
+  if (text(parser) === '=' && expect(parser, 'ASSIGN', `expected '=' or ';' after '${kw.Text}'`)) {
     rhs = Just(expr(parser));
   }
   expect(parser, 'SEMICOLON');
-  return New_Declaration_Variable(kw[1], lhs[1], rhs, !!exported);
+  return New_Declaration_Variable(kw.Text, lhs.Text, rhs, !!exported);
 }
 
 //let assignment_operator = new RegExp('^(=|+=|-=|*=|/=)$');
@@ -1292,7 +1280,7 @@ function maybe_import(parser) {
     expect(parser, 'from');
     let path = expect(parser, 'STRING');
     expect(parser, 'SEMICOLON');
-    return Just(New_Import_As(name[1], path[1]));
+    return Just(New_Import_As(name.Text, path.Text));
   }
 
 
@@ -1315,7 +1303,7 @@ function maybe_import(parser) {
   }
 
   expect(parser, 'SEMICOLON');
-  return Just(New_Import_List(identifiers, module_path[1]));
+  return Just(New_Import_List(identifiers, module_path.Text));
 }
 
 export function New_Declaration_Function(Name, Signature, Body, Exported, IsAsync) {
@@ -1398,7 +1386,7 @@ function maybe_module_name(parser) {
     throw new SyntaxError('expected SYMBOL after `module`', curtok(parser));
   }
   expect(parser, 'SEMICOLON');
-  return Just(New_ModuleName(module_name[1]));
+  return Just(New_ModuleName(module_name.Text));
 }
 
 export function New_Unit(Module, ImportList, DeclarationList, ExpectedOutput) {
@@ -1428,7 +1416,7 @@ function unit(parser) {
 
   let output;
   if (output = skip(parser, 'OUTPUT_COMMENT')) {
-    output = output[1];
+    output = output.Text;
   } else {
     output = '';
   }

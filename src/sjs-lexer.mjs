@@ -1,5 +1,5 @@
-function TokenMatcher(kind, regex) {
-  return { kind: kind, regex: new RegExp('^(?:' + regex + ')') };
+function TokenMatcher(token_type, regex) {
+  return { Type: token_type, Regex: new RegExp('^(?:' + regex + ')') };
 }
 
 let baseTokenMatchers = [
@@ -88,18 +88,18 @@ function next_item_including_whitespace_tokens(lexer) {
   while (index + 1 < lexer.tokenMatchers.length) {
     index = index + 1;
     let tokenMatcher = lexer.tokenMatchers[index];
-    let match = tokenMatcher.regex.exec(lexer.text);
+    let match = tokenMatcher.Regex.exec(lexer.text);
     if (match) {
-      // capture KIND, TEXT, LINE, COLUMN, OFFSET
-      const [k, t] = [tokenMatcher.kind,  match[0]];
+      // capture TYPE, TEXT, LINE, COLUMN, OFFSET
+      const [t, s] = [tokenMatcher.Type,  match[0]];
       const [l, c, o] = [lexer.line, lexer.column, lexer.offset];
 
       // Update lexer state, including position information
-      if (k === 'NEWLINE') {
+      if (t === 'NEWLINE') {
         lexer.line++;
         lexer.column = 1;
-      } else if (k === 'BLOCK_COMMENT' || (k === 'STRING' && t[0] === '`')) {
-        for (let c of t) {
+      } else if (t === 'BLOCK_COMMENT' || (t === 'STRING' && s[0] === '`')) {
+        for (let c of s) {
           if (c === '\n') {
             lexer.line++;
             lexer.column = 1;
@@ -108,26 +108,32 @@ function next_item_including_whitespace_tokens(lexer) {
           }
         }
       } else {
-        lexer.column += t.length;
+        lexer.column += s.length;
       }
-      lexer.offset += t.length;
-      lexer.text = lexer.text.substring(t.length);
+      lexer.offset += s.length;
+      lexer.text = lexer.text.substring(s.length);
 
-      // Return the token [KIND, TEXT, LINE, COLUMN, OFFSET]
-      if (k === 'KEYWORD') {
-        return [t, t, l, c, o];
+      // Return the token [TYPE, TEXT, LINE, COLUMN, OFFSET]
+      if (t === 'KEYWORD') {
+        return { Kind: 'Token', Type: s, Text: s, Line: l, Column: c, Offset: o };
+        // return [s, s, l, c, o];
       } else {
-        return [k, t, l, c, o];
+        return { Kind: 'Token', Type: t, Text: s, Line: l, Column: c, Offset: o };
+        // return [t, s, l, c, o];
       }
     }
   }
-  return ['EOF', '', lexer.line, lexer.column, lexer.offset];
+  return { Kind: 'Token', Type: 'EOF', Text: ''
+         , Line: lexer.line, Column: lexer.column
+         , Offset: lexer.offset
+         };
+  // return ['EOF', '', lexer.line, lexer.column, lexer.offset];
 }
 
 /* NextItem(showWhitespace) returns the next matched token
- * as an array `[KIND, TEXT, LINE, COLUMN, CHARACTER_OFFSET].
+ * as an array `[TYPE, TEXT, LINE, COLUMN, CHARACTER_OFFSET].
  *
- * KIND and TEXT are Strings (e.g., "SYMBOL" and "xyz").
+ * TYPE and TEXT are Strings (e.g., "SYMBOL" and "xyz").
  * LINE, COLUMN, and CHARACTER_OFFSET are Integers.
  * LINE and COLUMN are 1-based; CHARACTER_OFFSET is 0-based.
  *
@@ -139,9 +145,9 @@ function next_item_including_whitespace_tokens(lexer) {
  * Whitespace items are skipped unless `showWhitespace` is truthy.
  * Newlines are NOT skipped, even when `showWhitespace` is falsy.
  *
- * KIND is one of the `lexer.tokenMatchers[].kind` values (NEWLINE thru UNKNOWN),
- * except in the case of `lexer.tokenMatchers[].kind === 'KEYWORD'`. For keywords,
- * the KIND is a copy of TEXT. For example, KIND and TEXT will usually be
+ * TYPE is one of the `lexer.tokenMatchers[].Type` values (NEWLINE thru UNKNOWN),
+ * except in the case of `lexer.tokenMatchers[].Type === 'KEYWORD'`. For keywords,
+ * the TYPE is a copy of TEXT. For example, TYPE and TEXT will usually be
  * something like "FIXNUM" and "42". But for keywords, "if" and "if" (e.g.).
  */
 export function NextItem(lexer, showWhitespace) {
@@ -149,7 +155,7 @@ export function NextItem(lexer, showWhitespace) {
   //console.log(`NextItem(lexer: ${ShowLexer(lexer)}, showWhitespace: ${showWhitespace}`);
   while (1) {
     let token = next_item_including_whitespace_tokens(lexer);
-    let t = token[0];
+    let t = token.Type;
     if (showWhitespace || t !== 'WHITESPACE' && t !== 'NEWLINE' && t !== "EOL_COMMENT" && t !== "BLOCK_COMMENT") {
       return token;
     }

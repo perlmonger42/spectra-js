@@ -2,65 +2,69 @@ import { expect } from "chai";
 import { NextItem, NewLexer } from "../src/sjs-lexer.mjs";
 
 function match(token, kind, text) {
-  expect(token.slice(0,2)).to.have.ordered.members([kind, text]);
+  expect({Type: token.Type, Text: token.Text}).to.deep.equal({Type: kind, Text: text});
 }
 
 function SjsLexer(text) {
   return NewLexer('sjs', text);
 }
 
+function tok(t) {
+  return { Kind: 'Token', Type: t[0], Text: t[1], Line: t[2], Column: t[3], Offset: t[4] };
+}
+
 describe("SimpleJS Lexer", function () {
 
   it("should return EOF immediately on an empty string", function () {
     var lexer = SjsLexer("");
-    expect(NextItem(lexer, true)).to.deep.equal(['EOF', '', 1, 1, 0]);
+    expect(NextItem(lexer, true)).to.deep.equal(tok(['EOF', '', 1, 1, 0]));
   });
 
   describe("should scan regular expressions", function () {
     it("simple", function () {
       var lexer = SjsLexer("/blah/");
-      expect(NextItem(lexer, true)).to.deep.equal(['REGEXP', '/blah/', 1, 1, 0]);
+      expect(NextItem(lexer, true)).to.deep.equal(tok(['REGEXP', '/blah/', 1, 1, 0]));
     });
     it("with flags", function () {
       var lexer = SjsLexer("/x/gi");
-      expect(NextItem(lexer, true)).to.deep.equal(['REGEXP', '/x/gi', 1, 1, 0]);
+      expect(NextItem(lexer, true)).to.deep.equal(tok(['REGEXP', '/x/gi', 1, 1, 0]));
     });
     it("with escaped slash", function () {
       var lexer = SjsLexer("/\\//ms");
-      expect(NextItem(lexer, true)).to.deep.equal(['REGEXP', '/\\//ms', 1, 1, 0]);
+      expect(NextItem(lexer, true)).to.deep.equal(tok(['REGEXP', '/\\//ms', 1, 1, 0]));
     });
     it("with class", function () {
       var lexer = SjsLexer("/[a-z/]*/g");
-      expect(NextItem(lexer, true)).to.deep.equal(['REGEXP', '/[a-z/]*/g', 1, 1, 0]);
+      expect(NextItem(lexer, true)).to.deep.equal(tok(['REGEXP', '/[a-z/]*/g', 1, 1, 0]));
     });
   });
 
   it("should handle whitespace and newlines properly", function () {
     var lexer = SjsLexer(" \t\v \n \n\r\n   \n");
-    expect(NextItem(lexer, true)).to.deep.equal(['WHITESPACE', ' \t\v ', 1, 1, 0]);
-    expect(NextItem(lexer, true)).to.deep.equal(['NEWLINE', '\n', 1, 5, 4]);
-    expect(NextItem(lexer, true)).to.deep.equal(['WHITESPACE', ' ', 2, 1, 5]);
-    expect(NextItem(lexer, true)).to.deep.equal(['NEWLINE', '\n', 2, 2, 6]);
-    expect(NextItem(lexer, true)).to.deep.equal(['NEWLINE', '\r\n', 3, 1, 7]);
-    expect(NextItem(lexer, true)).to.deep.equal(['WHITESPACE', '   ', 4, 1, 9]);
-    expect(NextItem(lexer, true)).to.deep.equal(['NEWLINE', '\n', 4, 4, 12]);
-    expect(NextItem(lexer, true)).to.deep.equal(['EOF', '', 5, 1, 13]);
+    expect(NextItem(lexer, true)).to.deep.equal(tok(['WHITESPACE', ' \t\v ', 1, 1, 0]));
+    expect(NextItem(lexer, true)).to.deep.equal(tok(['NEWLINE', '\n', 1, 5, 4]));
+    expect(NextItem(lexer, true)).to.deep.equal(tok(['WHITESPACE', ' ', 2, 1, 5]));
+    expect(NextItem(lexer, true)).to.deep.equal(tok(['NEWLINE', '\n', 2, 2, 6]));
+    expect(NextItem(lexer, true)).to.deep.equal(tok(['NEWLINE', '\r\n', 3, 1, 7]));
+    expect(NextItem(lexer, true)).to.deep.equal(tok(['WHITESPACE', '   ', 4, 1, 9]));
+    expect(NextItem(lexer, true)).to.deep.equal(tok(['NEWLINE', '\n', 4, 4, 12]));
+    expect(NextItem(lexer, true)).to.deep.equal(tok(['EOF', '', 5, 1, 13]));
   });
 
   describe("should compute correct positions with newlines in tokens", function () {
     it("which happens with block comments", function () {
       var lexer = SjsLexer("1 /*\n*/ 2");
-      expect(NextItem(lexer, true)).to.deep.equal(['FIXNUM', '1', 1, 1, 0]);
-      expect(NextItem(lexer, true)).to.deep.equal(['WHITESPACE', ' ', 1, 2, 1]);
-      expect(NextItem(lexer, true)).to.deep.equal(['BLOCK_COMMENT', '/*\n*/', 1, 3, 2]);
-      expect(NextItem(lexer, true)).to.deep.equal(['WHITESPACE', ' ', 2, 3, 7]);
-      expect(NextItem(lexer, true)).to.deep.equal(['FIXNUM', '2', 2, 4, 8]);
+      expect(NextItem(lexer, true)).to.deep.equal(tok(['FIXNUM', '1', 1, 1, 0]));
+      expect(NextItem(lexer, true)).to.deep.equal(tok(['WHITESPACE', ' ', 1, 2, 1]));
+      expect(NextItem(lexer, true)).to.deep.equal(tok(['BLOCK_COMMENT', '/*\n*/', 1, 3, 2]));
+      expect(NextItem(lexer, true)).to.deep.equal(tok(['WHITESPACE', ' ', 2, 3, 7]));
+      expect(NextItem(lexer, true)).to.deep.equal(tok(['FIXNUM', '2', 2, 4, 8]));
     });
     it("which happens with back-quoted strings", function () {
       var lexer = SjsLexer("3`a\nb\nc`4");
-      expect(NextItem(lexer, true)).to.deep.equal(['FIXNUM', '3', 1, 1, 0]);
-      expect(NextItem(lexer, true)).to.deep.equal(['STRING', '`a\nb\nc`', 1, 2, 1]);
-      expect(NextItem(lexer, true)).to.deep.equal(['FIXNUM', '4', 3, 3, 8]);
+      expect(NextItem(lexer, true)).to.deep.equal(tok(['FIXNUM', '3', 1, 1, 0]));
+      expect(NextItem(lexer, true)).to.deep.equal(tok(['STRING', '`a\nb\nc`', 1, 2, 1]));
+      expect(NextItem(lexer, true)).to.deep.equal(tok(['FIXNUM', '4', 3, 3, 8]));
     });
   });
 
@@ -69,13 +73,13 @@ describe("SimpleJS Lexer", function () {
     var lexer = SjsLexer("a bc");
     beforeEach(function () { token = NextItem(lexer, true); });
     it("should be symbol 'a'", function () {
-      expect(token).to.deep.equal(['SYMBOL', 'a', 1, 1, 0]);
+      expect(token).to.deep.equal(tok(['SYMBOL', 'a', 1, 1, 0]));
     });
     it("should be whitespace", function () {
-      expect(token).to.deep.equal(['WHITESPACE', ' ', 1, 2, 1]);
+      expect(token).to.deep.equal(tok(['WHITESPACE', ' ', 1, 2, 1]));
     });
     it("should be symbol 'bc'", function () {
-      expect(token).to.deep.equal(['SYMBOL', 'bc', 1, 3, 2]);
+      expect(token).to.deep.equal(tok(['SYMBOL', 'bc', 1, 3, 2]));
     });
   });
 
@@ -96,52 +100,52 @@ describe("SimpleJS Lexer", function () {
     var lexer = SjsLexer("(){}[];=====!==!= <= < >= > =");
     beforeEach(function () { token = NextItem(lexer, false); });
     it("should be a open parenthesis", function () {
-      expect(token).to.deep.equal(['LPAREN', '(', 1, 1, 0]);
+      expect(token).to.deep.equal(tok(['LPAREN', '(', 1, 1, 0]));
     });
     it("should be a close parenthesis", function () {
-      expect(token).to.deep.equal(['RPAREN', ')', 1, 2, 1]);
+      expect(token).to.deep.equal(tok(['RPAREN', ')', 1, 2, 1]));
     });
     it("should be a open curly brace", function () {
-      expect(token).to.deep.equal(['LBRACE', '{', 1, 3, 2]);
+      expect(token).to.deep.equal(tok(['LBRACE', '{', 1, 3, 2]));
     });
     it("should be a close curly brace", function () {
-      expect(token).to.deep.equal(['RBRACE', '}', 1, 4, 3]);
+      expect(token).to.deep.equal(tok(['RBRACE', '}', 1, 4, 3]));
     });
     it("should be a open square bracket", function () {
-      expect(token).to.deep.equal(['LBRACK', '[', 1, 5, 4]);
+      expect(token).to.deep.equal(tok(['LBRACK', '[', 1, 5, 4]));
     });
     it("should be a close square bracket", function () {
-      expect(token).to.deep.equal(['RBRACK', ']', 1, 6, 5]);
+      expect(token).to.deep.equal(tok(['RBRACK', ']', 1, 6, 5]));
     });
     it("should be a semicolon", function () {
-      expect(token).to.deep.equal(['SEMICOLON', ';', 1, 7, 6]);
+      expect(token).to.deep.equal(tok(['SEMICOLON', ';', 1, 7, 6]));
     });
     it("should be an identical operator", function () {
-      expect(token).to.deep.equal(['IDENTICAL', '===', 1, 8, 7]);
+      expect(token).to.deep.equal(tok(['IDENTICAL', '===', 1, 8, 7]));
     });
     it("should be an equals operator", function () {
-      expect(token).to.deep.equal(['EQ', '==', 1, 11, 10]);
+      expect(token).to.deep.equal(tok(['EQ', '==', 1, 11, 10]));
     });
     it("should be a not-identical operator", function () {
-      expect(token).to.deep.equal(['NOTIDENTICAL', '!==', 1, 13, 12]);
+      expect(token).to.deep.equal(tok(['NOTIDENTICAL', '!==', 1, 13, 12]));
     });
     it("should be a not-equals operator", function () {
-      expect(token).to.deep.equal(['NEQ', '!=', 1, 16, 15]);
+      expect(token).to.deep.equal(tok(['NEQ', '!=', 1, 16, 15]));
     });
     it("should be a less-than-or-equals operator", function () {
-      expect(token).to.deep.equal(['LEQ', '<=', 1, 19, 18]);
+      expect(token).to.deep.equal(tok(['LEQ', '<=', 1, 19, 18]));
     });
     it("should be a less-than operator", function () {
-      expect(token).to.deep.equal(['LT', '<', 1, 22, 21]);
+      expect(token).to.deep.equal(tok(['LT', '<', 1, 22, 21]));
     });
     it("should be a greater-than-or-equals operator", function () {
-      expect(token).to.deep.equal(['GEQ', '>=', 1, 24, 23]);
+      expect(token).to.deep.equal(tok(['GEQ', '>=', 1, 24, 23]));
     });
     it("should be a greater-than operator", function () {
-      expect(token).to.deep.equal(['GT', '>', 1, 27, 26]);
+      expect(token).to.deep.equal(tok(['GT', '>', 1, 27, 26]));
     });
     it("should be an assignment operator", function () {
-      expect(token).to.deep.equal(['ASSIGN', '=', 1, 29, 28]);
+      expect(token).to.deep.equal(tok(['ASSIGN', '=', 1, 29, 28]));
     });
   });
 
@@ -151,19 +155,19 @@ describe("SimpleJS Lexer", function () {
     var lexer = NewLexer('sp1', text);
     beforeEach(function () { token = NextItem(lexer, false); });
     it("should be `do`", function () {
-      expect(token).to.deep.equal(['do', 'do', 1, 1, 0]);
+      expect(token).to.deep.equal(tok(['do', 'do', 1, 1, 0]));
     });
     it("should be `blah`", function () {
-      expect(token).to.deep.equal(['SYMBOL', 'blah', 1, 4, 3]);
+      expect(token).to.deep.equal(tok(['SYMBOL', 'blah', 1, 4, 3]));
     });
     it("should be `end`", function () {
-      expect(token).to.deep.equal(['end', 'end', 1, 9, 8]);
+      expect(token).to.deep.equal(tok(['end', 'end', 1, 9, 8]));
     });
     it("should be `fn`", function () {
-      expect(token).to.deep.equal(['fn', 'fn', 1, 13, 12]);
+      expect(token).to.deep.equal(tok(['fn', 'fn', 1, 13, 12]));
     });
     it("should be `elsif`", function () {
-      expect(token).to.deep.equal(['elsif', 'elsif', 1, 16, 15]);
+      expect(token).to.deep.equal(tok(['elsif', 'elsif', 1, 16, 15]));
     });
   });
 
@@ -173,43 +177,43 @@ describe("SimpleJS Lexer", function () {
     var lexer = SjsLexer(text);
     beforeEach(function () { token = NextItem(lexer, false); });
     it("should be SYMBOL `do`", function () {
-      expect(token).to.deep.equal(['SYMBOL', 'do', 1, 1, 0]);
+      expect(token).to.deep.equal(tok(['SYMBOL', 'do', 1, 1, 0]));
     });
     it("should be `else`", function () {
-      expect(token).to.deep.equal(['else', 'else', 1, 4, 3]);
+      expect(token).to.deep.equal(tok(['else', 'else', 1, 4, 3]));
     });
     it("should be SYMBOL `end`", function () {
-      expect(token).to.deep.equal(['SYMBOL', 'end', 1, 9, 8]);
+      expect(token).to.deep.equal(tok(['SYMBOL', 'end', 1, 9, 8]));
     });
     it("should be `if`", function () {
-      expect(token).to.deep.equal(['if', 'if', 1, 13, 12]);
+      expect(token).to.deep.equal(tok(['if', 'if', 1, 13, 12]));
     });
     it("should be `function`", function () {
-      expect(token).to.deep.equal(['function', 'function', 1, 16, 15]);
+      expect(token).to.deep.equal(tok(['function', 'function', 1, 16, 15]));
     });
     it("should be `import`", function () {
-      expect(token).to.deep.equal(['import', 'import', 1, 25, 24]);
+      expect(token).to.deep.equal(tok(['import', 'import', 1, 25, 24]));
     });
     it("should be `module`", function () {
-      expect(token).to.deep.equal(['module', 'module', 1, 32, 31]);
+      expect(token).to.deep.equal(tok(['module', 'module', 1, 32, 31]));
     });
     it("should be `then`", function () {
-      expect(token).to.deep.equal(['then', 'then', 1, 39, 38]);
+      expect(token).to.deep.equal(tok(['then', 'then', 1, 39, 38]));
     });
     it("should be `let`", function () {
-      expect(token).to.deep.equal(['let', 'let', 1, 44, 43]);
+      expect(token).to.deep.equal(tok(['let', 'let', 1, 44, 43]));
     });
     it("should be `export`", function () {
-      expect(token).to.deep.equal(['export', 'export', 1, 48, 47]);
+      expect(token).to.deep.equal(tok(['export', 'export', 1, 48, 47]));
     });
     it("should be SYMBOL `fn`", function () {
-      expect(token).to.deep.equal(['SYMBOL', 'fn', 1, 55, 54]);
+      expect(token).to.deep.equal(tok(['SYMBOL', 'fn', 1, 55, 54]));
     });
     it("should be SYMBOL `elsif`", function () {
-      expect(token).to.deep.equal(['SYMBOL', 'elsif', 1, 58, 57]);
+      expect(token).to.deep.equal(tok(['SYMBOL', 'elsif', 1, 58, 57]));
     });
     it("should be EOF", function () {
-      expect(token).to.deep.equal(['EOF', '', 1, 63, 62]);
+      expect(token).to.deep.equal(tok(['EOF', '', 1, 63, 62]));
     });
   });
 
