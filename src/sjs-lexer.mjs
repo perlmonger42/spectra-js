@@ -52,12 +52,13 @@ let baseTokenMatchers = [
   TokenMatcher('UNKNOWN',       '.'),
 ];
 
-export function NewLexer(language, text) {
+export function NewLexer(filename, language, text) {
   // ASSERT: language === 'sjs' or language === 'sp1'
   if (typeof(text) !== 'string') {
     throw new TypeError(`Lexer constructor wants string input, but ${typeof(text)} was provided`);
   }
   let lexer = {
+    file: filename,
     text: text,
     offset: 0,
     line: 1,
@@ -113,25 +114,29 @@ function next_item_including_whitespace_tokens(lexer) {
       lexer.offset += s.length;
       lexer.text = lexer.text.substring(s.length);
 
-      // Return the token [TYPE, TEXT, LINE, COLUMN, OFFSET]
+      let loc = { Kind: 'Loc', File: lexer.file, Line: l, Column: c, Offset: o };
       if (t === 'KEYWORD') {
-        return { Kind: 'Token', Type: s, Text: s, Line: l, Column: c, Offset: o };
-        // return [s, s, l, c, o];
+        // return {s, s, loc};
+        return { Kind: 'Token', Type: s, Text: s, Loc: loc };
       } else {
-        return { Kind: 'Token', Type: t, Text: s, Line: l, Column: c, Offset: o };
-        // return [t, s, l, c, o];
+        // return {t, s, loc};
+        return { Kind: 'Token', Type: t, Text: s, Loc: loc };
       }
     }
   }
-  return { Kind: 'Token', Type: 'EOF', Text: ''
-         , Line: lexer.line, Column: lexer.column
-         , Offset: lexer.offset
-         };
-  // return ['EOF', '', lexer.line, lexer.column, lexer.offset];
+  let loc = { Kind: 'Loc'
+             , File: lexer.file
+             , Line: lexer.line, Column: lexer.column, Offset: lexer.offset
+             };
+  return { Kind: 'Token', Type: 'EOF', Text: '', Loc: loc };
 }
 
 /* NextItem(showWhitespace) returns the next matched token
- * as an array `[TYPE, TEXT, LINE, COLUMN, CHARACTER_OFFSET].
+ * as an object `{ Kind: 'Token', Type: TYPE, Text: TEXT,
+ *                 Loc: { Kind: 'Loc', File: FILENAME,
+ *                        Line: LINE, Column: COLUMN, Offset: CHARACTER_OFFSET
+ *                      }
+ *               }`.
  *
  * TYPE and TEXT are Strings (e.g., "SYMBOL" and "xyz").
  * LINE, COLUMN, and CHARACTER_OFFSET are Integers.
@@ -140,7 +145,9 @@ function next_item_including_whitespace_tokens(lexer) {
  * As an example, the symbol `abc` at the very beginning of a file would
  * yield this token:
  *
- *   [ 'SYMBOL', 'abc', 1, 1, 0 ]
+ *   { Kind: 'Token', Type: 'SYMBOL', Text: 'abc',
+ *     Loc: { Kind: 'Loc', File: 'filename.mjs', Line: 1, Column: 1, Offset: 0 }
+ *   }
  *
  * Whitespace items are skipped unless `showWhitespace` is truthy.
  * Newlines are NOT skipped, even when `showWhitespace` is falsy.
@@ -160,4 +167,22 @@ export function NextItem(lexer, showWhitespace) {
       return token;
     }
   }
+}
+
+// Return the location of the end of a token
+export function LocAfter(token) {
+  let line = token.Loc.Line;
+  let column = token.Loc.Column;
+  for (let c of token.Text) {
+    if (c === '\n') {
+      line++;
+      column = 1;
+    } else {
+      column++;
+    }
+  }
+  return { Kind: 'Loc', File: token.Loc.File,
+           Line: line, Column: column,
+           Offset: token.Loc.Offset + token.Text.length
+         };
 }

@@ -1,4 +1,4 @@
-import { NextItem } from "./sjs-lexer.mjs";
+import { NextItem, LocAfter } from "./sjs-lexer.mjs";
 
 // Tokens are objects with this format:
 //   { Kind: 'Token', Type: string, Text: string, Line: integer, Column: integer, Offset: integer }
@@ -216,16 +216,43 @@ export function assert_is_string_match(value_name, value, regex) {
   }
 }
 
-export function assert_is_token(value_name, value, kind_regex) {
+export function assert_is_token(value_name, value) {
   assert_is_kind(value_name, value, 'Token');
-  assert_is_string(`${value_name}.Type`, value.type);
+  assert_is_string(`${value_name}.Type`, value.Type);
   assert_is_string(`${value_name}.Text`, value.Text);
+  assert_is_loc(`${value_name}.Loc`, value.Loc);
+}
+
+export function assert_is_token_type(value_name, value, type) {
+  assert_is_token(value_name, value);
+  if (value.Type !== type) {
+    let err = `${value_name}.Type is not '${type}'; it is ${describe_value(value.Type)}`;
+    throw new InternalError(err);
+  }
+}
+
+export function assert_is_token_match(value_name, value, regex) {
+  assert_is_token(value_name, value);
+  if (!regex.test(value.Text)) {
+    let err = `${value_name}.Text does not match ${regex}; it is ${describe_value(value.Text)}`;
+    throw new InternalError(err);
+  }
+}
+
+export function assert_is_token_equal(value_name, value, expected_value) {
+  assert_is_token(value_name, value);
+  if (value.Text !== expected_value) {
+    let err = `${value_name}.Text is not '${expected_value}'; it is ${describe_value(value.Text)}`;
+    throw new InternalError(err);
+  }
+}
+
+export function assert_is_loc(value_name, value) {
+  assert_is_kind(value_name, value, 'Loc');
+  assert_is_string(`${value_name}.File`, value.File);
   assert_is_number(`${value_name}.Line`, value.Line);
   assert_is_number(`${value_name}.Column`, value.Column);
   assert_is_number(`${value_name}.Offset`, value.Offset);
-  if (!kind_regex.test(value.Type)) {
-    throw new InternalError(`${value_name}.Type does not match ${kind_regex}; it is ${describe_value(value.Type)}`);
-  }
 }
 
 export function assert_is_list(value_name, value) {
@@ -463,8 +490,8 @@ function expect(parser, type, message) {
   }
   let token = parser.current_token;
   let found = token.Type === token.Text ? token.Type : `${token.Type} (\`${token.Text}\`)`;
-  let line = token.Line;
-  let column = token.Column;
+  let line = token.Loc.Line;
+  let column = token.Loc.Column;
   throw new SyntaxError(`${line}:${column}: ${message} but found \`${found}\` at line ${line} column ${column}`);
 }
 
@@ -498,31 +525,48 @@ function optional_identifier_list(parser) {
   return [ ];
 }
 
-export function New_Literal_Boolean(Value, Text) {
-  return { Kind: 'Literal', Tag:  'Boolean', Value, Text };
+export function New_Literal_Boolean(Token) {
+  let Text = Token.Text;
+  let Value = Text === 'true';
+  let Loc = Token.Loc;
+  return { Kind: 'Literal', Tag:  'Boolean', Value, Text, Loc };
 }
 
-export function New_Literal_Fixnum(Value, Text) {
-  return { Kind: 'Literal', Tag:  'Fixnum', Value, Text };
+export function New_Literal_Fixnum(Token) {
+  let Text = Token.Text;
+  let Value = parseInt(Text);
+  let Loc = Token.Loc;
+  return { Kind: 'Literal', Tag:  'Fixnum', Value, Text, Loc };
+
 }
 
-export function New_Literal_Flonum(Value, Text) {
-  return { Kind: 'Literal', Tag:  'Flonum', Value, Text };
+export function New_Literal_Flonum(Token) {
+  let Text = Token.Text;
+  let Value = parseFloat(Text);
+  let Loc = Token.Loc;
+  return { Kind: 'Literal', Tag:  'Flonum', Value, Text, Loc };
 }
 
-export function New_Literal_String(Value, Text) {
-  return { Kind: 'Literal', Tag:  'String', Value, Text };
+export function New_Literal_String(Token) {
+  let Text = Token.Text;
+  let Value = parseString(Text);
+  let Loc = Token.Loc;
+  return { Kind: 'Literal', Tag:  'String', Value, Text, Loc };
 }
 
-export function New_Literal_Regexp(Value, Text) {
-  return { Kind: 'Literal', Tag:  'Regexp', Value, Text };
+export function New_Literal_Regexp(Token) {
+  let Text = Token.Text;
+  let Value = parseRegexp(Text);
+  let Loc = Token.Loc;
+  return { Kind: 'Literal', Tag:  'Regexp', Value, Text, Loc };
 }
 
-export function New_Literal_Function(Name, Signature, Body) {
-  assert_is_string("New_Literal_Function.Name", Name);
+export function New_Literal_Function(Fn, Name, Signature, Body) {
+  assert_is_token_type("New_Literal_Function.Fn", Fn, 'function');
+  assert_is_token_type("New_Literal_Function.Name", Name, 'SYMBOL');
   assert_is_kind("New_Literal_Function.Signature", Signature, 'FunctionSignature');
   assert_is_kind_tag("New_Literal_Function.Body", Body, 'Statement', 'Block');
-  return { Kind: 'Literal', Tag: 'Function', Name, Signature, Body };
+  return { Kind: 'Literal', Tag: 'Function', Fn: Fn.Loc, Name, Signature, Body };
 }
 
 export function New_Literal_ArrowFunctionExpression(Formals, Expr) {
@@ -542,9 +586,9 @@ export function New_Expression_Grouping(Expr) {
   return { Kind: 'Expression', Tag: 'Grouping', Expr };
 }
 
-export function New_Expression_Symbol(Name) {
-  assert_is_string('New_Expression_Symbol.Name', Name);
-  return { Kind: 'Expression', Tag: 'Symbol', Name };
+export function New_Expression_Symbol(Token) {
+  assert_is_token_type('New_Expression_Symbol.Token', Token, 'SYMBOL');
+  return { Kind: 'Expression', Tag: 'Symbol', Name: Token.Text, Loc: Token.Loc };
 }
 
 export function New_Expression_Literal(Literal) {
@@ -554,42 +598,52 @@ export function New_Expression_Literal(Literal) {
 let prefix_unary_ops = new RegExp ('^(new|[-+!]|typeof|await)$');
 
 export function New_Expression_UnaryPrefix(Operator, Operand) {
-  assert_is_string_match('New_Expression_UnaryPrefix.Operator', Operator, prefix_unary_ops);
+  assert_is_token_match('New_Expression_UnaryPrefix.Operator', Operator, prefix_unary_ops);
   assert_is_kind('New_Expression_UnaryPrefix.Operand', Operand, 'Expression');
-  if (Operator === 'new') {
+  if (Operator.Text === 'new') {
     assert_is_kind_tag('New_Expression_UnaryPrefix.Operand', Operand, 'Expression', 'Symbol');
   }
-  return { Kind: 'Expression', Tag: 'Unary', Prefix: true, Operator, Operand };
+  return { Kind: 'Expression', Tag: 'Unary', Prefix: true
+         , Operator: Operator.Text, OperatorLoc: Operator.Loc
+         , Operand,
+         };
 }
 
 let postfix_unary_ops = new RegExp('^(--|[+][+])$');
 
 export function New_Expression_UnaryPostfix(Operator, Operand) {
-  assert_is_string_match('New_Expression_UnaryPostfix.Operator', Operator, postfix_unary_ops);
+  assert_is_token_match('New_Expression_UnaryPostfix.Operator', Operator, postfix_unary_ops);
   assert_is_kind('New_Expression_UnaryPostfix.Operand', Operand, 'Expression');
-  return { Kind: 'Expression', Tag: 'Unary', Prefix: false, Operator, Operand };
+  return { Kind: 'Expression', Tag: 'Unary', Prefix: false
+         , Operator: Operator.Text, OperatorLoc: Operator.Loc
+         , Operand
+         };
 }
 
-let binary_ops = new RegExp('^(new|[-+*/%.,]|===?|!==?|[-+*/]?=|[|][|]|[&][&]|<=?|>=?|\\[\\])$');
+let binary_ops = new RegExp('^(new|[-+*/%.,]|===?|!==?|[-+*/]?=|[|][|]|[&][&]|<=?|>=?|\\[)$');
 
 export function New_Expression_Binary(Operator, Left, Right) {
-  assert_is_string_match('New_Expression_Binary.Operator', Operator, binary_ops);
+  assert_is_token_match('New_Expression_Binary.Operator', Operator, binary_ops);
   assert_is_kind('New_Expression_Binary.Left', Left, 'Expression');
   assert_is_kind('New_Expression_Binary.Right', Right, 'Expression');
-  if (Operator === 'new') {
-    assert_is_kind_tag('New_Expression_binary.Right', Right, 'Expression', 'List');
+  if (Operator.Text === 'new') {
+    assert_is_kind_tag('New_Expression_Binary.Right', Right, 'Expression', 'List');
   }
-  return { Kind: 'Expression', Tag: 'Binary', Operator, Left, Right };
+  return { Kind: 'Expression', Tag: 'Binary'
+         , Operator: Operator.Text, OperatorLoc: Operator.Loc
+         , Left, Right };
 }
 
-let ternary_ops = new RegExp('^([?]:)$');
-
-export function New_Expression_Ternary(Operator, Test, Left, Right) {
-  assert_is_string_match('New_Expression_Ternary.Operator', Operator, ternary_ops);
+export function New_Expression_Ternary(QuestionOperator, ColonOperator, Test, Left, Right) {
+  assert_is_token_equal('New_Expression_Ternary.QuestionOperator', QuestionOperator, '?');
+  assert_is_token_equal('New_Expression_Ternary.ColonOperator', ColonOperator, ':');
   assert_is_kind('New_Expression_Ternary.Test', Test, 'Expression');
   assert_is_kind('New_Expression_Ternary.Left', Left, 'Expression');
   assert_is_kind('New_Expression_Ternary.Right', Right, 'Expression');
-  return { Kind: 'Expression', Tag: 'Ternary', Operator, Test, Left, Right };
+  return { Kind: 'Expression', Tag: 'Ternary'
+         , Operator: '?:', OperatorLoc: QuestionOperator.Loc, OperatorLoc2: ColonOperator.Loc
+         , Test, Left, Right
+         };
 }
 
 export function New_Expression_Apply(Functor, Arguments) {
@@ -628,9 +682,9 @@ function object_constructor(parser) {
     let tok = curtok(parser);
     let key;
     if (skip(parser, 'SYMBOL')) {
-      key = New_Expression_Symbol(tok.Text);
+      key = New_Expression_Symbol(tok);
     } else if (skip(parser, 'STRING')) {
-      key = New_Expression_Literal(New_Literal_String(parseString(tok.Text), tok.Text));
+      key = New_Expression_Literal(New_Literal_String(tok));
     } else {
       expect(parser, 'SYMBOL', 'expected SYMBOL or STRING (as object key)');
     }
@@ -675,11 +729,12 @@ function array_constructor(parser) {
 
 function function_literal(parser) {
   // function_literal := function_kw SYMBOL? '(' identifier_list? ')' body
-  expect(parser, parser.function_kw);
-  let name = skip(parser, 'SYMBOL') || { Type: 'SYMBOL', Text: ''};
+  let kw = expect(parser, parser.function_kw);
+  let name = skip(parser, 'SYMBOL') ||
+             { Kind: 'Token', Type: 'SYMBOL', Text: '', Loc: LocAfter(kw) };
   let signature = function_signature(parser);
   let body = statement_block(parser, "at start of function body");
-  return New_Literal_Function(name.Text, signature, body);
+  return New_Literal_Function(kw, name, signature, body);
 }
 
 function peek_block(parser) {
@@ -712,14 +767,14 @@ function arrow_function_literal(parser, formals) {
 
 function constructor_call(parser) {
   // constructor_call := 'new' SYMBOL '(' argument_list ')'
-  expect(parser, 'new');
+  let newToken = expect(parser, 'new');
   let constructorToken = expect(parser, 'SYMBOL');
-  let symbol = New_Expression_Symbol(constructorToken.Text);
+  let symbol = New_Expression_Symbol(constructorToken);
   if (peek(parser) === 'LPAREN') {
     let args = parenthesized_expression_list(parser, {});
-    return New_Expression_Binary('new', symbol, New_Expression_List(args));
+    return New_Expression_Binary(newToken, symbol, New_Expression_List(args));
   } else {
-    return New_Expression_UnaryPrefix('new', symbol);
+    return New_Expression_UnaryPrefix(newToken, symbol);
   }
 }
 
@@ -749,7 +804,7 @@ function factor(parser) {
   } else if (match(parser, 'PLUS') || match(parser, 'MINUS') || match(parser, 'NOT')) {
     let op = advance(parser);
     let arg = factor(parser);
-    value = New_Expression_UnaryPrefix(op.Text, arg);
+    value = New_Expression_UnaryPrefix(op, arg);
   } else if (match(parser, 'LBRACE')) {
     value = object_constructor(parser);
   } else if (match(parser, 'LBRACK')) {
@@ -759,23 +814,17 @@ function factor(parser) {
   } else if (match(parser, 'new')) {
     value = constructor_call(parser);
   } else if (match(parser, 'SYMBOL')) {
-    advance(parser);
-    value = New_Expression_Symbol(spelling);
+    value = New_Expression_Symbol(advance(parser));
   } else if (match(parser, 'BOOLEAN')) {
-    advance(parser);
-    value = New_Expression_Literal(New_Literal_Boolean(spelling === "true", spelling));
+    value = New_Expression_Literal(New_Literal_Boolean(advance(parser)));
   } else if (match(parser, 'FIXNUM')) {
-    advance(parser);
-    value = New_Expression_Literal(New_Literal_Fixnum(parseInt(spelling), spelling));
+    value = New_Expression_Literal(New_Literal_Fixnum(advance(parser)));
   } else if (match(parser, 'FLONUM')) {
-    advance(parser);
-    value = New_Expression_Literal(New_Literal_Flonum(parseFloat(spelling), spelling));
+    value = New_Expression_Literal(New_Literal_Flonum(advance(parser)));
   } else if (match(parser, 'STRING')) {
-    advance(parser);
-    value = New_Expression_Literal(New_Literal_String(parseString(spelling), spelling));
+    value = New_Expression_Literal(New_Literal_String(advance(parser)));
   } else if (match(parser, 'REGEXP')) {
-    advance(parser);
-    value = New_Expression_Literal(New_Literal_Regexp(parseRegexp(spelling), spelling));
+    value = New_Expression_Literal(New_Literal_Regexp(advance(parser)));
   } else {
     throw NewSyntaxError('EXPRESSION expected', curtok(parser));
   }
@@ -788,12 +837,16 @@ function factor(parser) {
       let op = advance(parser);
       let field = skip(parser, 'throw') || skip(parser, 'from') ||
                   skip(parser, 'fn') || expect(parser, 'SYMBOL', "expected SYMBOL after `.`");
-      value = New_Expression_Binary(op.Text, value, New_Expression_Symbol(field.Text));
+      // in this position, those keywords act as SYMBOLs
+      field.Type = 'SYMBOL';
+      value = New_Expression_Binary(op, value, New_Expression_Symbol(field));
     } else if (match(parser, 'LBRACK')) {
       let op = advance(parser);
       let index = expr(parser);
-      expect(parser, 'RBRACK');
-      value = New_Expression_Binary('[]', value, index);
+      let rightOp = expect(parser, 'RBRACK');
+      value = New_Expression_Binary(op, value, index);
+      value.Operator = '[]';
+      value.OperatorLoc2 = rightOp.Loc;
     } else {
       more = false;
     }
@@ -808,7 +861,7 @@ function postfix_unary(parser) {
   let arg = factor(parser);
   if (match_any(parser, ['INC', 'DEC'])) {
     let op = advance(parser);
-    arg = New_Expression_UnaryPostfix(op.Text, arg);
+    arg = New_Expression_UnaryPostfix(op, arg);
   }
   return arg;
 }
@@ -818,7 +871,7 @@ function prefix_unary(parser) {
   if (match_any(parser, ['PLUS', 'MINUS', 'NOT', 'INC', 'DEC', 'typeof', 'await'])) {
     let op = advance(parser);
     let arg = prefix_unary(parser);
-    return New_Expression_UnaryPrefix(op.Text, arg);
+    return New_Expression_UnaryPrefix(op, arg);
   }
   return postfix_unary(parser);
 }
@@ -830,7 +883,7 @@ function multiplicative(parser) {
   while (match(parser, 'STAR') || match(parser, 'SLASH')) {
     let op = advance(parser);
     let right = prefix_unary(parser);
-    left = New_Expression_Binary(op.Text, left, right);
+    left = New_Expression_Binary(op, left, right);
   }
   // console.log(`multiplicative returning `); console.log(left);
   return left;
@@ -843,7 +896,7 @@ function additive(parser) {
   while (match(parser, 'PLUS') || match(parser, 'MINUS')) {
     let op = advance(parser);
     let right = multiplicative(parser);
-    left = New_Expression_Binary(op.Text, left, right);
+    left = New_Expression_Binary(op, left, right);
   }
   // console.log(`additive returning `); console.log(left);
   return left;
@@ -855,7 +908,7 @@ function relational(parser) {
   while (match_any(parser, ['LT', 'GT', 'GEQ', 'LEQ'])) {
     let op = advance(parser);
     let right = additive(parser);
-    left = New_Expression_Binary(op.Text, left, right);
+    left = New_Expression_Binary(op, left, right);
   }
   return left;
 }
@@ -866,7 +919,7 @@ function equality(parser) {
   while (match_any(parser, ['IDENTICAL', 'NOTIDENTICAL', 'EQ', 'NEQ'])) {
     let op = advance(parser);
     let right = relational(parser);
-    left = New_Expression_Binary(op.Text, left, right);
+    left = New_Expression_Binary(op, left, right);
   }
   return left;
 }
@@ -877,7 +930,7 @@ function conjunction(parser) {
   while (match(parser, 'AND')) {
     let op = advance(parser);
     let right = equality(parser);
-    left = New_Expression_Binary(op.Text, left, right);
+    left = New_Expression_Binary(op, left, right);
   }
   return left;
 }
@@ -888,7 +941,7 @@ function disjunction(parser) {
   while (match(parser, 'OR')) {
     let op = advance(parser);
     let right = conjunction(parser);
-    left = New_Expression_Binary(op.Text, left, right);
+    left = New_Expression_Binary(op, left, right);
   }
   return left;
 }
@@ -901,12 +954,13 @@ function assignment(parser) {
   if (match(parser, 'ASSIGN')) {
     let op = advance(parser);
     let right = assignment(parser);
-    left = New_Expression_Binary(op.Text, left, right);
-  } else if (skip(parser, 'QUESTION')) {
+    left = New_Expression_Binary(op, left, right);
+  } else if (match(parser, 'QUESTION')) {
+    let questionOp = advance(parser);
     let ifTrue = disjunction(parser);
-    expect(parser, 'COLON', "expected `:` after `expr ? expr`");
+    let colonOp = expect(parser, 'COLON', "expected `:` after `expr ? expr`");
     let ifFalse = assignment(parser);
-    return New_Expression_Ternary('?:', left, ifTrue, ifFalse);
+    return New_Expression_Ternary(questionOp, colonOp, left, ifTrue, ifFalse);
   }
   return left;
 }
@@ -917,7 +971,7 @@ function sequence(parser) {
   while (match(parser, 'COMMA')) {
     let op = advance(parser);
     let right = assignment(parser);
-    left = New_Expression_Binary(op.Text, left, right);
+    left = New_Expression_Binary(op, left, right);
   }
   return left;
 }

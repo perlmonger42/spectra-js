@@ -9,7 +9,7 @@ let InputLanguage = 'sjs';
 
 function transpile_from_string(input_filename, input_text, writer) {
 //console.log("Parsing...");
-  let unit = Parse(NewParser(InputLanguage, NewLexer(InputLanguage, input_text)));
+  let unit = Parse(NewParser(InputLanguage, NewLexer(input_filename, InputLanguage, input_text)));
   if (unit.Tag == 'Just') { //console.log("Generating...");
     Generate(OutputLanguage, input_filename, unit.Just, writer);
   } else {

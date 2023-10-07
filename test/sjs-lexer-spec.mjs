@@ -6,11 +6,16 @@ function match(token, kind, text) {
 }
 
 function SjsLexer(text) {
-  return NewLexer('sjs', text);
+  return NewLexer('', 'sjs', text);
+}
+
+function Sp1Lexer(text) {
+  return NewLexer('', 'sp1', text);
 }
 
 function tok(t) {
-  return { Kind: 'Token', Type: t[0], Text: t[1], Line: t[2], Column: t[3], Offset: t[4] };
+  let loc = { Kind: 'Loc', File: '', Line: t[2], Column: t[3], Offset: t[4] };
+  return { Kind: 'Token', Type: t[0], Text: t[1], Loc: loc };
 }
 
 describe("SimpleJS Lexer", function () {
@@ -152,7 +157,7 @@ describe("SimpleJS Lexer", function () {
   describe("should recognize Spectra keywords", function () {
     var text = "do blah end fn elsif";
     var token;
-    var lexer = NewLexer('sp1', text);
+    var lexer = Sp1Lexer(text);
     beforeEach(function () { token = NextItem(lexer, false); });
     it("should be `do`", function () {
       expect(token).to.deep.equal(tok(['do', 'do', 1, 1, 0]));
