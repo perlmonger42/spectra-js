@@ -1,0 +1,7 @@
+// module main;
+let LanguageVersion = '0.0.1'; // Spectra 0.0.1
+
+
+console.log("\x1b[1;32mThis test fails on purpose to make sure errors are actually detected.\x1b[0m");
+// OUTPUT:
+// Nope

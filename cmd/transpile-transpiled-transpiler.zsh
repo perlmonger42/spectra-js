@@ -1,10 +1,38 @@
 #!/usr/bin/env zsh
+set -e  # exit on any error
 
 TMPDIR=$(mktemp -d /tmp/prism.XXXXXX)
-#trap 'rm -rf $TMPDIR' EXIT
+trap 'rm -rf $TMPDIR' EXIT
 
-rm -f ./**/*.compiled.*
-tree --gitignore .
+
+##### All this effort, and it doesn't work. The `[[ -n ... ]]` expression always
+##### tests true, whether there or not there are any x.compiled.y files. So just do...
+rm -f ./**/*.compiled.*(N)
+##### ... which might delete '' which never exists but the -f makes it not fail.
+##### # The `(N)` Glob Qualifier tells zsh to expand to '' if the glob has no matches.
+##### # The `(Y1)` Glob Qualifier tells zsh to expand to no more than 1 match.
+##### # The `(#q)` Glob Qualifier tells zsh to expand globs inside `[[ ... ]]`;
+##### # this is needed because glob expansion is normally suppressed in that context.
+##### # So `./**/*.compiled.*(#qNY1)` will expand to at most a single filename
+##### # matching `*.compiled.*`, or '' if there are no matches.
+##### # All of this is necessary to prevent an error when there are no matches,
+##### # because otherwise the `set -e` would cause the script to terminate prematurely.
+##### # See https://stackoverflow.com/questions/41502846/zsh-test-whether-a-file-matching-a-pattern-exists
+##### set extendedglob  # necessary to enable the `(#q)` syntax
+##### if [[ -n ./**/*.compiled.*(#qNY1) ]]; then
+#####   echo 'Removing ./**/*.compiled.*'
+#####   rm -f ./**/*.compiled.*
+##### fi
+##### unset extendedglob
+
+
+### copy all original sources into tmp/0_js and run tests
+echo "===== Test original transpiler in tmp/0_js ====="
+mkdir -p $TMPDIR/0_js
+cp -R . $TMPDIR/0_js
+cd $TMPDIR/0_js
+npm test && node cmd/run-tests.mjs
+tree --gitignore $TMPDIR/0_js
 
 
 ### use original transpiler to transpile original sjs => spectra => sjs
@@ -15,6 +43,7 @@ for SUBDIR in 'cmd' 'src' 'test' 'test/resources'; do
   mkdir -p $TMPDIR/1_sp/$SUBDIR
   node cmd/prism.mjs --verbose --output-language=sp1 --out-dir=$TMPDIR/1_sp/$SUBDIR ./$SUBDIR/*.[ms]js
 done
+node cmd/prism.mjs --verbose --output-language=sp1 --out-dir=$TMPDIR/1_sp/$SUBDIR ./$SUBDIR/*.sp1
 tree --gitignore $TMPDIR/1_sp
 
 # compile all spectra source code in tmp/1_sp into js code in tmp/2_js

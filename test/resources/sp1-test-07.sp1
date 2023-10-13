@@ -1,0 +1,37 @@
+// module main;
+let LanguageVersion = '0.0.1'; // Spectra 0.0.1
+
+
+// test lambdas and array indexing
+
+fn fill_array(a, f) do
+  let n = 0;
+  while n < a.length do
+    a[n] = f(n);
+    n++;
+  end
+  return a;
+end
+
+fn main() do
+  // gather the first 8 squares
+  let a = fill_array(new Array(8), (i) => i * i);
+  let i = 0;
+  while i < 8 do
+    console.log(a[i]);
+    i++;
+  end
+  console.log(new Array);
+end
+
+main();
+// OUTPUT:
+// 0
+// 1
+// 4
+// 9
+// 16
+// 25
+// 36
+// 49
+// []

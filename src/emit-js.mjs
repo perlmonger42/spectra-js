@@ -172,7 +172,7 @@ function emit_declaration_function(decl) {
   // decl is { Tag: 'Function'
   //         , Name: string
   //         , Signature: FunctionSignature
-  //         , Body: Statement/Block
+  //         , Body: Statement/List
   //         , Exported: boolean
   //         , IsAsync: boolean
   //         }
@@ -215,7 +215,8 @@ function emit_statement(stmt) {
   //      or { Kind: 'Statement', Tag: 'Throw', Expression };
   //      or { Kind: 'Statement', Tag: 'Return', Expression };
   //      or { Kind: 'Statement', Tag: 'Expression', Expression };
-  //      or { Kind: 'Statement', Tag: 'Block', Declarations };
+  //      or { Kind: 'Statement', Tag: 'List', Statements };
+  //      or { Kind: 'Statement', Tag: 'Block', Statements, Opener: Token, Closer: Token };
   if (stmt.Tag === 'If') {
     lang.emit_if_stmt(stmt);
   } else if (stmt.Tag === 'While') {
@@ -228,7 +229,7 @@ function emit_statement(stmt) {
     emit_statement_return(stmt);
   } else if (stmt.Tag === 'Expression') {
     emit_statement_expression(stmt);
-  } else if (stmt.Tag === 'Block') {
+  } else if (stmt.Tag === 'List' || stmt.Tag === 'Block') {
     emit_statement_block(stmt);
   } else {
     nyi(`emit_statement of ${stmt.Kind}/${stmt.Tag}`);
@@ -236,9 +237,10 @@ function emit_statement(stmt) {
 }
 
 function emit_statement_block(body) {
-  // body is { Kind: 'Statement', Tag: 'Block', Declarations: [Declaration...] }
+  // body is { Kind: 'Statement', Tag: 'List', Statements: [Declaration...] }
+  // or      { Kind: 'Statement', Tag: 'List', Statements: [Declaration...], Opener: Token, Closer: Token }
   emit(lang.begin_block);
-  emit_statement_list(body.Declarations);
+  emit_statement_list(body.Statements);
   nl_emit(lang.end_block);
 }
 
@@ -252,7 +254,12 @@ function emit_statement_list(stmt_list) {
 }
 
 function js_emit_statement_if(stmt) {
-  // stmt is { Kind: 'Statement', Tag: 'If', Test: Expression, Body: Statement/Block, Else: Maybe(Statement) };
+  // stmt is { Kind: 'Statement', Tag: 'If', Test: Expression, Body, Else: Maybe(Statement) };
+  // Body is { Kind: 'Statement', Tag: 'List', Statements }
+  //      or { Kind: 'Statement', Tag: 'Block', Statements, Opener, Closer }
+  // Else is { Kind: 'Statement', Tab: 'List', Statements }
+  //      or { Kind: 'Statement', Tag: 'Block', Statements, Opener, Closer }
+  //      or { Kind: 'Statement', Tag: 'If', Test: Expression, Body, Else: Maybe(Statement) }
   emit('if (');
   emit_expression(stmt.Test);
   emit(') ');
@@ -267,7 +274,7 @@ function sp1_emit_statement_if(stmt) {
   emit('if ');
   emit_expression(stmt.Test);
   emit(' then');
-  emit_statement_list(stmt.Body.Declarations);
+  emit_statement_list(stmt.Body.Statements);
   stmt = stmt.Else;
   while (isJust(stmt)) {
     stmt = stmt.Just;
@@ -275,11 +282,11 @@ function sp1_emit_statement_if(stmt) {
       nl_emit('elsif ');
       emit_expression(stmt.Test);
       emit(' then');
-      emit_statement_list(stmt.Body.Declarations);
+      emit_statement_list(stmt.Body.Statements);
       stmt = stmt.Else;
-    } else if (stmt.Kind === 'Statement' && stmt.Tag === 'Block') {
+    } else if (stmt.Kind === 'Statement' && (stmt.Tag === 'List' || 'Block')) {
       nl_emit('else');
-      emit_statement_list(stmt.Declarations);
+      emit_statement_list(stmt.Statements);
       nl_emit('end');
       return;
     }
@@ -300,7 +307,7 @@ function emit_statement_for(stmt) {
   // Keyword    is null or 'var' or 'let' or 'const'
   // Vars       is [string...]
   // Collection is Expression
-  // Body       is Statement/Block
+  // Body       is Statement/List
   emit(`for ${lang.test_lpar}`);
   if (stmt.Keyword !== null) {
     emit(stmt.Keyword + ' ');
@@ -343,11 +350,11 @@ function emit_expression(expr) {
   //      or            { Kind: 'Expression', Tag: 'Unary', Prefix: true, Operator, Operand };
   //      or            { Kind: 'Expression', Tag: 'Unary', Prefix: false, Operator, Operand };
   //      or            { Kind: 'Expression', Tag: 'Binary', Operator, Left, Right };
-  //      or            { Kind: 'Expression', Tag: 'Ternary', Operator, Test, Left, Right };
-  //      or            { Kind: 'Expression', Tag: 'Apply', Functor, Arguments: [Expression...] };
-  //      or            { Kind: 'Expression', Tag: 'New', FunctorName, Arguments };
+  //      or            { Kind: 'Expression', Tag: 'PostCircumfix', Left, Right, DelimiterLeft, DelimiterRight };
+  //      or            { Kind: 'Expression', Tag: 'Ternary', Left, OperatorLeft, Middle, OperatorRight, Right };
+  //      or            { Kind: 'Expression', Tag: 'New', FunctorName, Arguments: Expression_List };
   //      or            { Kind: 'Expression', Tag: 'Pair', Key, Value };
-  //      or            { Kind: 'Expression', Tag: 'Object', Pairs };
+  //      or            { Kind: 'Expression', Tag: 'Object', DelimiterLeft, DelimiterRight, Pairs };
   //      or            { Kind: 'Expression', Tag: 'List', Expressions };
   //      or            { Kind: 'Expression', Tag: 'Array', Expressions };
   if (expr.Tag === 'Symbol') {
@@ -360,11 +367,10 @@ function emit_expression(expr) {
     emit_expression_unary(expr);
   } else if (expr.Tag === 'Binary') {
     emit_expression_binary(expr);
+  } else if (expr.Tag === 'PostCircumfix') {
+    emit_expression_postcircumfix(expr);
   } else if (expr.Tag === 'Ternary') {
     emit_expression_ternary(expr);
-  } else if (expr.Tag === 'Apply') {
-    emit_expression(expr.Functor);
-    emit_list_of_expressions('(', expr.Arguments, ')');
   } else if (expr.Tag === 'Object') {
     emit_expression_object(expr);
   } else if (expr.Tag === 'List') {
@@ -383,11 +389,11 @@ function emit_expression_literal(literal) {
   //         or { Kind: 'Literal', Tag: 'String', Value, Text };
   //         or { Kind: 'Literal', Tag: 'Regexp', Value, Text };
   //         or { Kind: 'Literal', Tag: 'Function', Name, Signature, Body };
-  //         or { Kind: 'Literal', Tag: 'ArrowFunctionExpression', Formals, Expr };
-  //         or { Kind: 'Literal', Tag: 'ArrowFunctionBlock', Formals, Block };
-  // Formals is [string...]
+  //         or { Kind: 'Literal', Tag: 'ArrowFunctionExpression', Arrow: Token, Formals, Expr };
+  //         or { Kind: 'Literal', Tag: 'ArrowFunctionBlock', Arrow: Token, Formals, Block };
+  // Formals is { Kind: 'Expression', Tag: 'List', Expressions: [Expression...] }
   // Expr    is Expression
-  // Block   is Statement/Block
+  // Block   is Statement/List
   let tag = literal.Tag;
   if (tag === 'Regexp') {
     emit(literal.Text);
@@ -397,11 +403,11 @@ function emit_expression_literal(literal) {
   } else if (tag === 'Function') {
     emit_literal_function(literal);
   } else if (tag == 'ArrowFunctionExpression') {
-    emit_list_of_names('(', literal.Formals, ')');
+    emit_expression_list('(', literal.Formals, ')');
     emit(' => ');
     emit_expression(literal.Expr);
   } else if (tag === 'ArrowFunctionBlock') {
-    emit_list_of_names('(', literal.Formals, ')');
+    emit_expression_list('(', literal.Formals, ')');
     emit(' => ');
     emit_statement_block(literal.Block);
   } else {
@@ -418,26 +424,28 @@ function emit_expression_parenthesized(expr, useParentheses) {
 function emit_expression_unary(expr) {
   // expr is { Kind: 'Expression', Tag: 'Unary', Prefix: true, Operator: string, Operand: Expression };
   let prec = precedence(expr);
+  let op = expr.Operator.Text;
   if (expr.Prefix) {
-    emit(expr.Operator);
-    if (expr.Operator === 'typeof' || expr.Operator === 'await') {
+    emit(op);
+    if (op === 'typeof' || op === 'await' || op === 'new') {
       emit(' ');
     }
   }
   emit_expression_parenthesized(expr.Operand, precedence(expr.Operand) < prec);
   if (!expr.Prefix) {
-    emit(expr.Operator);
+    emit(op);
   }
 }
 
 function emit_expression_binary(expr) {
   // expr is { Kind: 'Expression', Tag: 'Binary', Operator: string, Left: Expression, Right: Expression };
-  if (expr.Operator === 'new') {
+  let op = expr.Operator.Text;
+  if (op === 'new') {
     emit('new ');
     emit_expression(expr.Left);
     emit_expression(expr.Right);
     return;
-  } else if (expr.Operator === '[]') {
+  } else if (op === '[') {
     emit_expression_parenthesized(expr.Left, precedence(expr.Left) < precedence(expr));
     emit_list_of_expressions('[', [expr.Right], ']');
     return;
@@ -446,25 +454,39 @@ function emit_expression_binary(expr) {
   let prec = precedence(expr);
   emit_expression_parenthesized(expr.Left, precedence(expr.Left) < prec);
   if (prec >= 17) {
-    emit(expr.Operator);
+    emit(op);
   } else {
-    emit(` ${expr.Operator} `);
+    emit(` ${op} `);
   }
   emit_expression_parenthesized(expr.Right, precedence(expr.Right) < prec);
 }
 
+function emit_expression_postcircumfix(expr) {
+  // expr is { Kind: 'Expression', Tag: 'PostCircumfix', DelimiterLeft: Token, DelimiterRight: Token,
+  //                                                     Left: Expression, Right: Expression };
+  let op1 = expr.DelimiterLeft.Text;
+  let op2 = expr.DelimiterRight.Text;
+  if (op1 === '[') { // 'Index', i.e., array subscript
+    emit_expression_parenthesized(expr.Left, precedence(expr.Left) < precedence(expr));
+    emit_list_of_expressions(op1, [expr.Right], op2);
+  } else if (op1 === '(') { // 'Apply', i.e. function application
+    emit_expression_parenthesized(expr.Left, precedence(expr.Left) < precedence(expr));
+    emit_expression_list('(', expr.Right, ')');
+  }
+}
+
 function emit_expression_ternary(expr) {
-  // expr is            { Kind: 'Expression', Tag: 'Ternary', Operator, Test, Left, Right };
+  // expr is { Kind: 'Expression', Tag: 'Ternary', Left, OperatorLeft: Token, Middle, OperatorRight: Token, Right };
   let prec = precedence(expr);
-  emit_expression_parenthesized(expr.Test, precedence(expr.Test) <= prec);
+  emit_expression_parenthesized(expr.Left, precedence(expr.Left) <= prec);
   emit(' ? ');
-  emit_expression_parenthesized(expr.Left, precedence(expr.Left) < prec);
+  emit_expression_parenthesized(expr.Middle, precedence(expr.Middle) < prec);
   emit(' : ');
   emit_expression_parenthesized(expr.Right, precedence(expr.Right) < prec);
 }
 
 function emit_expression_object(expr) {
-  // expr  is { Kind: 'Expression', Tag: 'Object', Pairs };
+  // expr  is { Kind: 'Expression', Tag: 'Object', DelimiterLeft: Token, DelimiterRight: Token, Pairs };
   // Pairs is [Pair...]
   if (expr.Pairs.length === 0) {
     emit('{  }');
@@ -488,8 +510,8 @@ function emit_expression_object(expr) {
 
 function emit_expression_array(expr) {
   // expr is  { Kind: 'Expression', Tag: 'Array', Expressions };
-  // Expressions is [Expression...]
-  let exprs = expr.Expressions;
+  // Expressions is { Kind: 'Expression', Tag: 'List', Expressions: [Expression...] }
+  let exprs = expr.Expressions.Expressions;
   if (exprs.length === 0) {
     emit('[ ]');
   } else if (exprs.length === 1) {
@@ -519,7 +541,7 @@ function emit_key(expr) {
 }
 
 function emit_pair(pair) {
-  // pair is { Kind: 'Expression', Tag: 'Pair', Key, Value: Expression };
+  // pair is { Kind: 'Expression', Tag: 'Pair', Operator: Token(":"), Key, Value: Expression };
   // key  is { Kind: 'Expression', Tag: 'Symbol', Name }
   //      or { Kind: 'Expression', Tag: 'Literal', Literal: Literal/String }
   // Literal/String is { Kind: 'Literal', Tag:  'String', Value: string, Text: string };
@@ -528,6 +550,10 @@ function emit_pair(pair) {
     emit(': ');
     emit_expression(pair.Value.Just);
   }
+}
+
+function emit_expression_list(prefix, expression_list, postfix) {
+  emit_list_of_expressions(prefix, expression_list.Expressions, postfix);
 }
 
 function emit_list_of_expressions(prefix, exprs, postfix) {
@@ -554,14 +580,15 @@ function emit_list_of_names(prefix, names, postfix) {
 
 
 function emit_literal_function(func) {
-  // func              is { Kind: 'Literal', Tag: 'Function', Name: string, Signature, Body };
+  // func              is { Kind: 'Literal', Tag: 'Function', Fn: Token, Name: string, Signature, Body };
   // Signature         is FunctionSignature
-  // Body              is Statement/Block
-  // FunctionSignature is { Kind: 'FunctionSignature', Tag: 'FunctionSignature', FormalParameters };
+  // Body              is Statement/List
+  // FunctionSignature is { Kind: 'FunctionSignature', Tag: 'FunctionSignature', DelimiterLeft, DelimiterRight,
+  //                        FormalParameters };
   // FormalParameters  is [string...]
   emit(lang.func + ' ');
-  if (func.Name !== '') {
-    emit(func.Name);
+  if (func.Name.Text !== '') {
+    emit(func.Name.Text);
   }
   emit_list_of_names('(', func.Signature.FormalParameters, ')');
   emit_statement_block(func.Body);
@@ -573,40 +600,45 @@ function precedence(expr) {
   if (expr.Tag === 'Grouping') {
     return precedence(expr.Expr);
   } else if (expr.Tag === 'Unary') {
+    let op = expr.Operator.Text;
     if (expr.Prefix) {
-      if (expr.Operator === '-' || expr.Operator === '+' || expr.Operator === '!'
-      ||  expr.Operator === '++' || expr.Operator === '--'
-      || expr.Operator === 'typeof' || expr.Operator === 'await') {
-      return 14;
+      if (op === '-' || op === '+' || op === '!' ||  op === '++' || op === '--'
+                     || op === 'typeof' || op === 'await' || op === 'new') {
+        return 14;
       }
-    } else if (expr.Operator === '--' || expr.Operator === '++') {
+    } else if (op === '--' || op === '++') {
       return 15;
-    } else if (expr.Operator === 'new') {
+    } else if (op === 'new') {
       return 16;
     }
   } else if (expr.Tag === 'Binary') {
-    if (expr.Operator === ',') {
+    let op = expr.Operator.Text;
+    if (op === ',') {
       return 1;
-    } else if (expr.Operator === '=' || expr.Operator === '+=' || expr.Operator === '-='
-     || expr.Operator === '*=' || expr.Operator === '/=' ) {
+    } else if (op === '=' || op === '+=' || op === '-=' || op === '*=' || op === '/=' ) {
       return 2;
-    } else if (expr.Operator === '||') {
+    } else if (op === '||') {
       return 3;
-    } else if (expr.Operator === '&&') {
+    } else if (op === '&&') {
       return 4;
-    } else if (expr.Operator === '==' || expr.Operator === '==='
-           || expr.Operator === '!=' || expr.Operator === '!==') {
+    } else if (op === '==' || op === '==='
+           || op === '!=' || op === '!==') {
       return 8;
-    } else if (expr.Operator === '<' || expr.Operator === '>' || expr.Operator === '<='
-           || expr.Operator === '>=' || expr.Operator === 'in') {
+    } else if (op === '<' || op === '>' || op === '<='
+           || op === '>=' || op === 'in') {
       return 9;
-    } else if (expr.Operator === '-' || expr.Operator === '+') {
+    } else if (op === '-' || op === '+') {
       return 11;
-    } else if (expr.Operator === '*' || expr.Operator === '/' || expr.Operator === '%') {
+    } else if (op === '*' || op === '/' || op === '%') {
       return 12;
-    } else if (expr.Operator === '**') {
+    } else if (op === '**') {
       return 13;
-    } else if (expr.Operator === '.' || expr.Operator === '[]' || expr.Operator === 'new') {
+    } else if (op === '.' || op === 'new') {
+      return 17;
+    }
+  } else if (expr.Tag === 'PostCircumfix') {
+    let op = expr.DelimiterLeft.Text;
+    if (op === '[' || op === '(') {
       return 17;
     }
   } else if (expr.Tag === 'Ternary') {
@@ -617,7 +649,7 @@ function precedence(expr) {
     return 18;
   } else if (expr.Tag === 'Pair') {
     return 2;  // this is really the comma operator inside object constructors
-  } else if (expr.Tag === 'New' || expr.Tag === 'Apply') {
+  } else if (expr.Tag === 'New') {
     return 17;
   }
   throw new InternalError(`not yet implemented: precedence of ${to_s(expr)}`);

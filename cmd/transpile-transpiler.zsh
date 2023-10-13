@@ -12,7 +12,7 @@ done
 
 # copy additional resources into $TMPDIR
 mkdir -p $TMPDIR/test/resources
-cp test/resources/*.sjs $TMPDIR/test/resources
+cp test/resources/*.{sjs,sp1} $TMPDIR/test/resources
 cp package.json .gitignore $TMPDIR
 cd $TMPDIR
 npm install

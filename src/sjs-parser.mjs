@@ -335,8 +335,14 @@ export function assert_is_kind_tag(value_name, value, kind, tag) {
 
 function NewSyntaxError(message, token) {
   let name = token.Type === token.Text ? token.Type : `${token.Type} (\`${token.Text}\`)`;
-  let line = token.Line;
-  let column = token.Column;
+  let line = token.Loc.Line;
+  let column = token.Loc.Column;
+  return SyntaxError(`${message}; found ${name} at line ${line} column ${column}`);
+}
+
+function NewSyntaxErrorAt(message, ast_node) {
+  let line = ast_node.Loc.Line;
+  let column = ast_node.Loc.Column;
   return SyntaxError(`${message}; found ${name} at line ${line} column ${column}`);
 }
 
@@ -562,28 +568,32 @@ export function New_Literal_Regexp(Token) {
 }
 
 export function New_Literal_Function(Fn, Name, Signature, Body) {
-  assert_is_token_type("New_Literal_Function.Fn", Fn, 'function');
+  assert_is_token_match("New_Literal_Function.Fn", Fn, /^(fn|function)$/);
   assert_is_token_type("New_Literal_Function.Name", Name, 'SYMBOL');
   assert_is_kind("New_Literal_Function.Signature", Signature, 'FunctionSignature');
   assert_is_kind_tag("New_Literal_Function.Body", Body, 'Statement', 'Block');
-  return { Kind: 'Literal', Tag: 'Function', Fn: Fn.Loc, Name, Signature, Body };
+  return { Kind: 'Literal', Tag: 'Function', Fn, Name, Signature, Body };
 }
 
-export function New_Literal_ArrowFunctionExpression(Formals, Expr) {
-  assert_is_list_of("New_Literal_ArrowFunctionExpression.Formals", Formals, string_asserter());
+export function New_Literal_ArrowFunctionExpression(Arrow, Formals, Expr) {
+  assert_is_token_equal("New_Literal_ArrowFunctionExpression.Arrow", Arrow, '=>');
+  assert_is_kind_tag("New_Literal_ArrowFunctionExpression.Formals", Formals, 'Expression', 'List');
   assert_is_kind("New_Literal_ArrowFunctionExpression.Expr", Expr, 'Expression');
   return { Kind: 'Literal', Tag: 'ArrowFunctionExpression', Formals, Expr };
 }
 
-export function New_Literal_ArrowFunctionBlock(Formals, Block) {
-  assert_is_list_of("New_Literal_ArrowFunctionBlock.Formals", Formals, string_asserter());
-  assert_is_kind_tag("New_Literal_ArrowFunctionBlock.Block", Block, 'Statement', 'Block');
+export function New_Literal_ArrowFunctionBlock(Arrow, Formals, Block) {
+  assert_is_token_equal("New_Literal_ArrowFunctionBlock.Arrow", Arrow, '=>');
+  assert_is_kind_tag("New_Literal_ArrowFunctionBlock.Formals", Formals, 'Expression', 'List');
+  assert_is_kind("New_Literal_ArrowFunctionBlock.Block", Block, 'Statement', 'Block');
   return { Kind: 'Literal', Tag: 'ArrowFunctionBlock', Formals, Block };
 }
 
-export function New_Expression_Grouping(Expr) {
+export function New_Expression_Grouping(Opener, Closer, Expr) {
+  assert_is_token_equal('New_Expression_Grouping.Opener', Opener, '(');
+  assert_is_token_equal('New_Expression_Grouping.Closer', Closer, ')');
   assert_is_kind('New_Expression_Grouping.Expr', Expr, 'Expression');
-  return { Kind: 'Expression', Tag: 'Grouping', Expr };
+  return { Kind: 'Expression', Tag: 'Grouping', Opener, Closer, Expr };
 }
 
 export function New_Expression_Symbol(Token) {
@@ -603,10 +613,7 @@ export function New_Expression_UnaryPrefix(Operator, Operand) {
   if (Operator.Text === 'new') {
     assert_is_kind_tag('New_Expression_UnaryPrefix.Operand', Operand, 'Expression', 'Symbol');
   }
-  return { Kind: 'Expression', Tag: 'Unary', Prefix: true
-         , Operator: Operator.Text, OperatorLoc: Operator.Loc
-         , Operand,
-         };
+  return { Kind: 'Expression', Tag: 'Unary', Prefix: true, Operator, Operand };
 }
 
 let postfix_unary_ops = new RegExp('^(--|[+][+])$');
@@ -614,10 +621,7 @@ let postfix_unary_ops = new RegExp('^(--|[+][+])$');
 export function New_Expression_UnaryPostfix(Operator, Operand) {
   assert_is_token_match('New_Expression_UnaryPostfix.Operator', Operator, postfix_unary_ops);
   assert_is_kind('New_Expression_UnaryPostfix.Operand', Operand, 'Expression');
-  return { Kind: 'Expression', Tag: 'Unary', Prefix: false
-         , Operator: Operator.Text, OperatorLoc: Operator.Loc
-         , Operand
-         };
+  return { Kind: 'Expression', Tag: 'Unary', Prefix: false, Operator, Operand };
 }
 
 let binary_ops = new RegExp('^(new|[-+*/%.,]|===?|!==?|[-+*/]?=|[|][|]|[&][&]|<=?|>=?|\\[)$');
@@ -629,27 +633,34 @@ export function New_Expression_Binary(Operator, Left, Right) {
   if (Operator.Text === 'new') {
     assert_is_kind_tag('New_Expression_Binary.Right', Right, 'Expression', 'List');
   }
-  return { Kind: 'Expression', Tag: 'Binary'
-         , Operator: Operator.Text, OperatorLoc: Operator.Loc
-         , Left, Right };
+  return { Kind: 'Expression', Tag: 'Binary', Operator, Left, Right };
 }
 
-export function New_Expression_Ternary(QuestionOperator, ColonOperator, Test, Left, Right) {
-  assert_is_token_equal('New_Expression_Ternary.QuestionOperator', QuestionOperator, '?');
-  assert_is_token_equal('New_Expression_Ternary.ColonOperator', ColonOperator, ':');
-  assert_is_kind('New_Expression_Ternary.Test', Test, 'Expression');
+export function New_Expression_PostCircumfix(DelimiterLeft, DelimiterRight, Left, Right) {
+  assert_is_kind('New_Expression_PostCircumfix.Left', Left, 'Expression');
+  assert_is_kind('New_Expression_PostCircumfix.Right', Right, 'Expression');
+  assert_is_token_match('New_Expression_PostCircumfix.DelimiterLeft', DelimiterLeft, /[\[(]/);
+  assert_is_token_match('New_Expression_PostCircumfix.DelimiterRight', DelimiterRight, /[\])]/);
+  return { Kind: 'Expression', Tag: 'PostCircumfix', DelimiterLeft, DelimiterRight, Left, Right };
+}
+
+export function New_Expression_Ternary(OperatorLeft, OperatorRight, Left, Middle, Right) {
+  assert_is_token_equal('New_Expression_Ternary.OperatorLeft', OperatorLeft, '?');
+  assert_is_token_equal('New_Expression_Ternary.OperatorRight', OperatorRight, ':');
   assert_is_kind('New_Expression_Ternary.Left', Left, 'Expression');
+  assert_is_kind('New_Expression_Ternary.Middle', Middle, 'Expression');
   assert_is_kind('New_Expression_Ternary.Right', Right, 'Expression');
-  return { Kind: 'Expression', Tag: 'Ternary'
-         , Operator: '?:', OperatorLoc: QuestionOperator.Loc, OperatorLoc2: ColonOperator.Loc
-         , Test, Left, Right
-         };
+  return { Kind: 'Expression', Tag: 'Ternary', OperatorLeft, OperatorRight, Left, Middle, Right };
 }
 
 export function New_Expression_Apply(Functor, Arguments) {
   assert_is_kind("New_Expression_Apply.Functor", Functor, 'Expression');
-  assert_is_list_of("New_Expression_Apply.Arguments", Arguments, kind_asserter('Expression'));
-  return { Kind: 'Expression', Tag: 'Apply', Functor, Arguments };
+  assert_is_kind_tag("New_Expression_Apply.Arguments", Arguments, 'Expression', 'List');
+  let leftParen = Arguments.Opener;
+  let rightParen = Arguments.Closer;
+  assert_is_token_equal("New_Expression_Apply.Arguments.Opener", leftParen, '(');
+  assert_is_token_equal("New_Expression_Apply.Arguments.Closer", rightParen, ')');
+  return New_Expression_PostCircumfix(leftParen, rightParen, Functor, Arguments);
 }
 
 export function parseString(text) {
@@ -663,21 +674,28 @@ function parseRegexp(text) {
   return text;
 }
 
-export function New_Expression_Pair(Key, Value) {
+export function New_Expression_Pair(Operator, Key, Value) {
+  // TODO: Consider whether this should just be a Binary with Operator == ':'
+  assert_is_maybe_kind('New_Expression_Pair.Operator', Operator, 'Token');
   assert_is_kind('New_Expression_Pair.Key', Key, 'Expression');
   assert_is_maybe_kind('New_Expression_Pair.Value', Value, 'Expression');
   assert_is_string_match('New_Expression_Pair.Key.Tag', Key.Tag, /^(Symbol|Literal)$/);
-  return { Kind: 'Expression', Tag: 'Pair', Key, Value };
+  if (isJust(Operator)) {
+    assert_is_token_equal('New_Expression_Pair.Operator.Just', Operator.Just, ':');
+  }
+  return { Kind: 'Expression', Tag: 'Pair', Operator, Key, Value };
 }
 
-export function New_Expression_Object(Pairs) {
+export function New_Expression_Object(DelimiterLeft, DelimiterRight, Pairs) {
+  assert_is_token_equal('New_Expression_Object.DelimiterLeft', DelimiterLeft, '{');
+  assert_is_token_equal('New_Expression_Object.DelimiterRight', DelimiterRight, '}');
   assert_is_list_of('New_Expression_Object.Pairs', Pairs, kind_tag_asserter('Expression', 'Pair'));
-  return { Kind: 'Expression', Tag: 'Object', Pairs };
+  return { Kind: 'Expression', Tag: 'Object', DelimiterLeft, DelimiterRight, Pairs };
 }
 
 function object_constructor(parser) {
   let kv_pairs = [ ];
-  expect(parser, 'LBRACE', 'expected `{`');
+  let openCurly = expect(parser, 'LBRACE', 'expected `{`');
   while (!match_any(parser, ['RBRACE', 'EOF'])) {
     let tok = curtok(parser);
     let key;
@@ -690,31 +708,37 @@ function object_constructor(parser) {
     }
 
     let value = None('Expression');
-    if (skip(parser, 'COLON')) {
+    let colon = None('Token');
+    if (match(parser, 'COLON')) {
+      colon = Just(advance(parser));
       value = Just(expr_no_comma(parser));
     }
-    kv_pairs.push(New_Expression_Pair(key, value));
+    kv_pairs.push(New_Expression_Pair(colon, key, value));
     if (!skip(parser, 'COMMA')){
       break;
     }
   }
-  expect(parser, 'RBRACE', 'expected `}`');
-  return New_Expression_Object(kv_pairs);
+  let closeCurly = expect(parser, 'RBRACE', 'expected `}`');
+  return New_Expression_Object(openCurly, closeCurly, kv_pairs);
 }
 
-export function New_Expression_List(Expressions) {
-  assert_is_list_of('New_Expression_Array.Expressions', Expressions, kind_asserter('Expression'));
-  return { Kind: 'Expression', Tag: 'List', Expressions };
+export function New_Expression_List(Opener, Closer, Expressions, HasTrailingComma) {
+  assert_is_token('New_Expression_List.Opener', Opener);
+  assert_is_token('New_Expression_List.Closer', Closer);
+  assert_is_list_of('New_Expression_List.Expressions', Expressions, kind_asserter('Expression'));
+  assert_is_boolean('New_Expression_List.HasTrailingComma', HasTrailingComma);
+  return { Kind: 'Expression', Tag: 'List', Opener, Closer, Expressions, HasTrailingComma };
 }
 
 export function New_Expression_Array(Expressions) {
-  assert_is_list_of('New_Expression_Array.Expressions', Expressions, kind_asserter('Expression'));
+  assert_is_kind_tag('New_Expression_Array.Expressions', Expressions, 'Expression', 'List');
+  assert_is_token_equal('New_Expression_Array.Expressions.Opener', Expressions.Opener, '[');
+  assert_is_token_equal('New_Expression_Array.Expressions.Closer', Expressions.Closer, ']');
   return { Kind: 'Expression', Tag: 'Array', Expressions };
 }
 
 function array_constructor(parser) {
-  expect(parser, 'LBRACK', 'expected `[`');
-  let expressions = expression_list(parser, {});
+  return New_Expression_Array(delimited_expression_list(parser, "[]"));
   // let expressions = [ ];
   // while (!match_any(parser, ['RBRACK', 'EOF'])) {
   //   let expression = expr(parser);
@@ -723,8 +747,6 @@ function array_constructor(parser) {
   //     break;
   //   }
   // }
-  expect(parser, 'RBRACK', 'expected `]`');
-  return New_Expression_Array(expressions);
 }
 
 function function_literal(parser) {
@@ -742,6 +764,7 @@ function peek_block(parser) {
 }
 
 function arrow_function_literal(parser, formals) {
+  assert_is_kind_tag("arrow_function_literal.formals", formals, 'Expression', 'List');
   // arrow_function_literal := '(' identifiers ')' '=>' expression
   // This is a very small subset of the arrow-function syntax of JavaScript;
   // see https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Functions/Arrow_functions
@@ -751,17 +774,16 @@ function arrow_function_literal(parser, formals) {
   // The parenthesized identifier list has already been consumed,
   // but it was read as an expression list, so check that it is
   // a list of identifiers.
-  formals = formals.map((sym) => {
+  for (let sym of formals.Expressions) {
     if (!is_kind_tag(sym, 'Expression', 'Symbol')) {
-      expect(parser, 'UNMATCHABLE', "expected identifier list before '=>'", arrow);
+      throw NewSyntaxError("expected identifier list before '=>'", formals.Opener.Just);
     }
-    return sym.Name;
-  });
+  }
 
   if (peek_block(parser)) {
-    return New_Literal_ArrowFunctionBlock(formals, statement_block(parser));
+    return New_Literal_ArrowFunctionBlock(arrow, formals, statement_block(parser));
   } else {
-    return New_Literal_ArrowFunctionExpression(formals, expr(parser));
+    return New_Literal_ArrowFunctionExpression(arrow, formals, expr(parser));
   }
 }
 
@@ -771,8 +793,8 @@ function constructor_call(parser) {
   let constructorToken = expect(parser, 'SYMBOL');
   let symbol = New_Expression_Symbol(constructorToken);
   if (peek(parser) === 'LPAREN') {
-    let args = parenthesized_expression_list(parser, {});
-    return New_Expression_Binary(newToken, symbol, New_Expression_List(args));
+    let args_expression_list = parenthesized_expression_list(parser, {});
+    return New_Expression_Binary(newToken, symbol, args_expression_list);
   } else {
     return New_Expression_UnaryPrefix(newToken, symbol);
   }
@@ -784,22 +806,14 @@ function factor(parser) {
   let spelling = text(parser);
   if (match(parser, 'EOF')) {
     throw new SyntaxError("unexpected end-of-input");
-//  } else if (skip(parser, 'LPAREN')) {
-//    if (skip(parser, 'RPAREN')) {
-//      value = New_Expression_Literal(arrow_function_literal(parser, []));
-//    } else {
-//      value = expr(parser);
-//      expect(parser, 'RPAREN');
-//    }
   } else if (peek(parser) === 'LPAREN') {
-    let hasTrailingComma = {};
-    let exprs = parenthesized_expression_list(parser, hasTrailingComma);
+    let exprs = parenthesized_expression_list(parser);
     if (exprs.length === 0 || peek(parser) === 'ARROW') {
       value = New_Expression_Literal(arrow_function_literal(parser, exprs));
-    } else if (exprs.length === 1 && !hasTrailingComma.value) {
-      return New_Expression_Grouping(exprs[0]);
+    } else if (exprs.Expressions.length === 1 && !exprs.HasTrailingComma) {
+      return New_Expression_Grouping(exprs.Opener, exprs.Closer, exprs.Expressions[0]);
     } else {
-      value = New_Expression_List(exprs);
+      value = exprs;
     }
   } else if (match(parser, 'PLUS') || match(parser, 'MINUS') || match(parser, 'NOT')) {
     let op = advance(parser);
@@ -834,19 +848,17 @@ function factor(parser) {
     if (match(parser, 'LPAREN')) {
       value = New_Expression_Apply(value, parenthesized_expression_list(parser, {}));
     } else if (match(parser, 'DOT')) {
-      let op = advance(parser);
+      let dotOp = advance(parser);
+      // in this position, {`throw`, `from`, `fn`} act as symbols, not keywords
       let field = skip(parser, 'throw') || skip(parser, 'from') ||
                   skip(parser, 'fn') || expect(parser, 'SYMBOL', "expected SYMBOL after `.`");
-      // in this position, those keywords act as SYMBOLs
       field.Type = 'SYMBOL';
-      value = New_Expression_Binary(op, value, New_Expression_Symbol(field));
+      value = New_Expression_Binary(dotOp, value, New_Expression_Symbol(field));
     } else if (match(parser, 'LBRACK')) {
-      let op = advance(parser);
+      let leftBracket = advance(parser);
       let index = expr(parser);
-      let rightOp = expect(parser, 'RBRACK');
-      value = New_Expression_Binary(op, value, index);
-      value.Operator = '[]';
-      value.OperatorLoc2 = rightOp.Loc;
+      let rightBracket = expect(parser, 'RBRACK');
+      value = New_Expression_PostCircumfix(leftBracket, rightBracket, value, index);
     } else {
       more = false;
     }
@@ -857,7 +869,7 @@ function factor(parser) {
 }
 
 function postfix_unary(parser) {
-  // postfix_unary ::= factor { ('++'|'--') }
+  // postfix_unary ::= factor [ ('++'|'--') ]
   let arg = factor(parser);
   if (match_any(parser, ['INC', 'DEC'])) {
     let op = advance(parser);
@@ -965,8 +977,8 @@ function assignment(parser) {
   return left;
 }
 
-function sequence(parser) {
-  // sequence ::= assignment { ',' assignment }
+function assignmentSequence(parser) {
+  // assignmentSequence ::= assignment { ',' assignment }
   let left = assignment(parser);
   while (match(parser, 'COMMA')) {
     let op = advance(parser);
@@ -981,7 +993,7 @@ function expr_no_comma(parser) {
 }
 
 function expr(parser) {
-  return sequence(parser);
+  return assignmentSequence(parser);
 }
 
 function maybe_expr(parser) {
@@ -992,99 +1004,121 @@ function maybe_expr(parser) {
     return None('Expression');
 }
 
-function expression_list(parser, hasTrailingComma) {
-  // expression_list := one_or_more_expressions ','? | /* empty */
-  // one_or_more_expressions := expression | one_or_more_expressions ',' expression
-  let expressions = [ ];
+function delimited_expression_list(parser, brackets) {
+  // delimited_expression_list     := parenthesized_expression_list | bracket_expression_list
+  // parenthesized_expression_list ::= '(' expression_list ')'
+  // bracketed_expression_list     ::= '[' expression_list ']'
+  // expression_list               := one_or_more_expressions ','? | /* empty */
+  // one_or_more_expressions       := expression | one_or_more_expressions ',' expression
+  if (brackets !== "()" && brackets !== "[]") {
+    let err = `delimited_expression_list.brackets is neither "()" nor "[]"; it is ${describe_value(brackets)}`;
+    throw new InternalError(err);
+  }
 
+  let openerType = brackets === "()" ? 'LPAREN' : 'LBRACK';
+  let closerType = brackets === "()" ? 'RPAREN' : 'RBRACK';
+  let expressions = [ ];
+  let hasTrailingComma = false;
+
+  let openToken = expect(parser, openerType, `expected \`${brackets[0]}\``);
   while (match_any(parser, parser.initial_expression_tokens)) {
-    hasTrailingComma.value = false;
+    hasTrailingComma = false;
     expressions.push(expr_no_comma(parser));
     if (!skip(parser, 'COMMA')) {
       break;
     }
-    hasTrailingComma.value = true;
+    hasTrailingComma = true;
   }
+  let closeToken = expect(parser, closerType, `expected \`${brackets[1]}\``);
 
-  return expressions;
+  return New_Expression_List(openToken, closeToken, expressions, hasTrailingComma);
 }
 
-function parenthesized_expression_list(parser, hasTrailingComma) {
+function bracketed_expression_list(parser) {
+  // bracketed_expression_list ::= '(' expression_list ')'
+  return delimited_expression_list(parser, "[]");
+}
+
+function parenthesized_expression_list(parser) {
   // parenthesized_expression_list ::= '(' expression_list ')'
-  expect(parser, 'LPAREN', "expected `(`");
-  let expressions = expression_list(parser, hasTrailingComma);
-  expect(parser, 'RPAREN', "expected `)`");
-  return expressions;
+  return delimited_expression_list(parser, "()");
 }
 
-export function New_Statement_If(Test, Body, Else) {
+export function New_Statement_If(If, Then, End, Test, Body, Else) {
+  assert_is_token_match("New_Statement_If.If", If, /^(els)?if$/);
+  assert_is_maybe_kind("New_Statement_If.Then", Then, 'Token');
+  if (isJust(Then)) {
+    assert_is_token_equal("New_Statement_If.Then.Just", Then.Just, 'then');
+  }
+  assert_is_maybe_kind("New_Statement_If.End", End, 'Token');
+  if (isJust(End)) {
+    assert_is_token_equal("New_Statement_If.End.Just", End.Just, 'end');
+  }
   assert_is_kind("New_Statement_If.Test", Test, 'Expression');
-  assert_is_kind_tag("New_Statement_If.Body", Body, 'Statement', 'Block');
+  assert_is_kind("New_Statement_If.Body", Body, 'Statement');
+  assert_is_string_match("New_Statement_If.Body.Tag", Body.Tag, /^(List|Block)$/);
   assert_is_maybe_kind("New_Statement_If.Else", Else, 'Statement');
-  return { Kind: 'Statement', Tag: 'If', Test, Body, Else };
+  if (isJust(Else)) {
+    assert_is_string_match("New_Statement_If.Else.Just.Tag", Else.Just.Tag, /^(If|List|Block)$/);
+  }
+  return { Kind: 'Statement', Tag: 'If', If, Then, End, Test, Body, Else };
 }
 
-function if_statement_sp1(parser) {
+function if_statement_sp1(parser, ifOrElsifToken, captureEndToken) {
   // The 'if' or 'elsif' has already been skipped.
   if (!match_any(parser, parser.initial_expression_tokens)) {
     expect(parser, 'EXPRESSION', "expected EXPRESSION after `if`");
   }
   let test = expr(parser);
-  expect(parser, 'then', 'expected `then` after `if EXPRESSION`');
-
-  let body = [];
-  let item;
-  while (isJust(item = maybe_declaration(parser))) {
-    body.push(item.Just);
-  }
-  body = New_Statement_Block(body);
-
-  let alternative = maybe_else_statement_sp1(parser);
-  return New_Statement_If(test, body, alternative);
+  let thenToken = expect(parser, 'then', 'expected `then` after `if EXPRESSION`');
+  let body = statement_list(parser);
+  let tail = maybe_else_statement_sp1(parser, captureEndToken);
+  let endToken = Just(captureEndToken.value);
+  return New_Statement_If(ifOrElsifToken, Just(thenToken), endToken, test, body, tail);
 }
 
-function maybe_else_statement_sp1(parser) {
-  if (skip(parser, 'end')) {
+function maybe_else_statement_sp1(parser, captureEndToken) {
+  if (match(parser, 'end')) {
+    captureEndToken.value = advance(parser);
     return None('Statement');
   }
-  if (skip(parser, 'elsif')) {
-    return Just(if_statement_sp1(parser));
+  if (match(parser, 'elsif')) {
+    let elsifToken = advance(parser);
+    return Just(if_statement_sp1(parser, elsifToken, captureEndToken));
   }
   if (!skip(parser, 'else')) {
     expect(parser, 'elsif|else|end', 'expected `elsif`, `else`, or `end` after `if EXPRESSION then STATEMENT...`)');
   }
-
-  let body = [];
-  let item;
-  while (isJust(item = maybe_declaration(parser))) {
-    body.push(item.Just);
-  }
-  expect(parser, 'end', 'expected `end` after `else STATEMENT...`');
-  return Just(New_Statement_Block(body));
+  let body = Just(statement_list(parser));
+  captureEndToken.value = expect(parser, 'end', 'expected `end` after `else STATEMENT...`');
+  return body;
 }
 
-function if_statement_sjs(parser) {
+function if_statement_sjs(parser, ifToken) {
   // The 'if' has already been skipped.
-  expect(parser, 'LPAREN', "expected `(` after `if`");
+  let opener = expect(parser, 'LPAREN', "expected `(` after `if`");
   let test = expr(parser);
-  expect(parser, 'RPAREN', "expected `)` after `if (EXPRESSION`");
+  let closer = expect(parser, 'RPAREN', "expected `)` after `if (EXPRESSION`");
+  test = New_Expression_Grouping(opener, closer, test);
   let body = statement_block(parser, "after `if (EXPRESSION)`");
   let alternative = maybe_else_statement_sjs(parser);
-  return New_Statement_If(test, body, alternative);
+  return New_Statement_If(ifToken, None('Token'), None('Token'), test, body, alternative);
 }
 
 function maybe_else_statement_sjs(parser) {
   if (!skip(parser, 'else')) {
     return None('Statement');
   }
-  if (skip(parser, 'if')) {
-    return Just(if_statement_sjs(parser));
+  if (match(parser, 'if')) {
+    let ifToken = advance(parser);
+    return Just(if_statement_sjs(parser, ifToken));
   }
   return Just(statement_block(parser, "or `if` after `else`"));
 }
 
 function if_statement(parser) {
-  return parser.is_spectra ? if_statement_sp1(parser) : if_statement_sjs(parser);
+  let ifToken = expect(parser, 'if');
+  return parser.is_spectra ? if_statement_sp1(parser, ifToken, {}) : if_statement_sjs(parser, ifToken);
 }
 
 export function New_Statement_While(Test, Body) {
@@ -1194,7 +1228,7 @@ export function New_Statement_Expression(Expression) {
 function maybe_statement(parser, exported) {
   let statement;
   //console.log(`maybe_statement, at ${showCurrentToken(parser)}`);
-  if (skip(parser, 'if')) {
+  if (match(parser, 'if')) {
     statement = if_statement(parser);
   } else if (skip(parser, 'while')) {
     statement = while_statement(parser);
@@ -1217,48 +1251,59 @@ function maybe_statement(parser, exported) {
   return Just(New_Declaration_Statement(statement));
 }
 
-export function New_FunctionSignature(FormalParameters) {
+export function New_FunctionSignature(DelimiterLeft, DelimiterRight, FormalParameters) {
+  assert_is_token_equal("New_FunctionSignature.DelimiterLeft", DelimiterLeft, '(');
+  assert_is_token_equal("New_FunctionSignature.DelimiterRight", DelimiterRight, ')');
   assert_is_list_of("New_FunctionSignature.FormalParameters", FormalParameters, string_asserter());
-  return { Kind: 'FunctionSignature', Tag: 'FunctionSignature', FormalParameters };
+  return { Kind: 'FunctionSignature', Tag: 'FunctionSignature', DelimiterLeft, DelimiterRight, FormalParameters };
 }
 
 function function_signature(parser) {
-  //console.log(`function_signature, at ${showCurrentToken(parser)}`);
-  expect(parser, 'LPAREN', "expected `(` to begin function parameter list");
-  //console.log(`after '(' in function_signature, at ${showCurrentToken(parser)}`);
+  let lparen = expect(parser, 'LPAREN', "expected `(` to begin function parameter list");
   let identifiers = optional_identifier_list(parser);
-  //console.log(`after optional_identifier_list in function_signature, at ${showCurrentToken(parser)}`);
-  expect(parser, 'RPAREN', 'expected `,` or `)`');
-  //console.log(`after ')' in function_signature, at ${showCurrentToken(parser)}`);
-  return New_FunctionSignature(identifiers);
+  let rparen = expect(parser, 'RPAREN', 'expected `,` or `)`');
+  return New_FunctionSignature(lparen, rparen, identifiers);
 }
 
-export function New_Statement_Block(Declarations) {
-  assert_is_list_of("New_Statement_Block.Declarations", Declarations, kind_asserter('Declaration'));
-  return { Kind: 'Statement', Tag: 'Block', Declarations };
+// A Statement_List is a list of statements -- i.e., a list of Declaration-or-Statement elements
+export function New_Statement_List(Statements) {
+  assert_is_list_of("New_Statement_List.Statements", Statements, kind_asserter('Declaration'));
+  return { Kind: 'Statement', Tag: 'List', Statements };
+}
+
+// A Statement_Block is a Statement_List surrounded by brackets (do/end, {/}, etc.)
+export function New_Statement_Block(Opener, Closer, Statements) {
+  assert_is_token_match("New_Statement_Block.Opener", Opener, /^(do|[{])$/);
+  assert_is_token_match("New_Statement_Block.Closer", Closer, /^(end|[}])$/);
+  assert_is_list_of("New_Statement_Block.Statements", Statements, kind_asserter('Declaration'));
+  return { Kind: 'Statement', Tag: 'Block', Opener, Closer, Statements };
+}
+
+function list_of_statements(parser) {
+  let statements = [];
+  let statement;
+  while (isJust(statement = maybe_declaration(parser))) {
+    statements.push(statement.Just);
+  }
+  return statements;
 }
 
 function statement_list(parser) {
-  let DeclarationList = [];
-  let item;
-  while (isJust(item = maybe_declaration(parser))) {
-    DeclarationList.push(item.Just);
-  }
-  return New_Statement_Block(DeclarationList);
+  return New_Statement_List(list_of_statements(parser));
 }
 
 function statement_block_sp1(parser, extra_expect_message) {
-  expect(parser, 'do', `expected \`do\` ${extra_expect_message}`);
-  let block = statement_list(parser);
-  expect(parser, 'end', "expected DECLARATION or `end`");
-  return block;
+  let opener = expect(parser, 'do', `expected \`do\` ${extra_expect_message}`);
+  let statement_list = list_of_statements(parser);
+  let closer = expect(parser, 'end', "expected DECLARATION or `end`");
+  return New_Statement_Block(opener, closer, statement_list);
 }
 
 function statement_block_sjs(parser, extra_expect_message) {
-  expect(parser, 'LBRACE', `expected \`{\` ${extra_expect_message}`);
-  let block = statement_list(parser);
-  expect(parser, 'RBRACE', "expected DECLARATION or `}`");
-  return block;
+  let opener = expect(parser, 'LBRACE', `expected \`{\` ${extra_expect_message}`);
+  let statement_list = list_of_statements(parser);
+  let closer = expect(parser, 'RBRACE', "expected DECLARATION or `}`");
+  return New_Statement_Block(opener, closer, statement_list);
 }
 
 function statement_block(parser, msg) {
@@ -1462,11 +1507,7 @@ function unit(parser) {
     ImportList.push(item.Just);
   }
 
-  let DeclarationList = [];
-  while (isJust(item = maybe_declaration(parser))) {
-    DeclarationList.push(item.Just);
-  }
-
+  let StatementList = list_of_statements(parser);
 
   let output;
   if (output = skip(parser, 'OUTPUT_COMMENT')) {
@@ -1476,7 +1517,7 @@ function unit(parser) {
   }
 
   expect(parser, 'EOF', "expected DECLARATION or EOF");
-  return New_Unit(Module, ImportList, DeclarationList, output);
+  return New_Unit(Module, ImportList, StatementList, output);
 }
 
 // Return value is an AST; see "./syntax-tree-format.md" for details.

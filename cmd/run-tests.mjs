@@ -114,7 +114,9 @@ async function run_test(script_filename) {
   if (received !== expected) {
     expected = expected.replace(/^/gm, '    ');
     received = received.replace(/^/gm, '    ');
-    console.error(`  Test failed.\n  Expected:\n${expected}\n  Received:\n${received}`);
+    let RED="\x1b[1;31m"; // actually, bold red
+    let RESET="\x1b[0m";
+    console.error(`  Test failed.\n  Expected:\n${expected}\n  Received:\n${RED}${received}${RESET}`);
     return false;
   }
 
@@ -133,7 +135,10 @@ async function main() {
   let ok = true;
   filenames.sort();
   for (let filename of filenames) {
-    if (!await run_test(filename)) {
+    let file_ok = await run_test(filename);
+    let deliberate_failure_test_name = /test-00[.]/i;
+    let should_fail = deliberate_failure_test_name.test(filename);
+    if (file_ok === should_fail) {
       ok = false;
     }
   }

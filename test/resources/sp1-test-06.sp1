@@ -1,0 +1,54 @@
+// module main;
+let LanguageVersion = '0.0.1'; // Spectra 0.0.1
+
+
+// test functions, compound assignment, `while`, and `for x of collection`
+
+// compute the nth Fibonacci number
+fn fibonacci(n) do
+  let [a, b] = [
+    0,
+    1
+  ];
+  while n > 0 do
+    [
+      a,
+      b
+    ] = [
+      b,
+      a + b
+    ];
+    n--;
+  end
+  return a;
+end
+
+fn main() do
+  // gather the first 12 Fibonacci numbers
+  let fib = [ ];
+  let i = 0;
+  while i < 12 do
+    fib.push(fibonacci(i));
+    i++;
+  end
+
+  // print the Fibonacci numbers we gathered
+  for let f of fib do
+    console.log(f);
+  end
+end
+
+main();
+// OUTPUT:
+// 0
+// 1
+// 1
+// 2
+// 3
+// 5
+// 8
+// 13
+// 21
+// 34
+// 55
+// 89

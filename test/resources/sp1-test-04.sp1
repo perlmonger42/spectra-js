@@ -1,0 +1,12 @@
+// module main;
+let LanguageVersion = '0.0.1'; // Spectra 0.0.1
+
+
+console.log([
+  -7,
+  -3 * 2,
+  -(2 + 3),
+  -(2 * 2)
+]);
+// OUTPUT:
+// [ -7, -6, -5, -4 ]

@@ -5,12 +5,12 @@ import { InternalError, NewParser, Parse
        , New_Unit, New_ModuleName
        , New_Declaration_Function, New_Declaration_Variable, New_Declaration_Variables
        , New_Declaration_Statement
-       , New_FunctionSignature, New_Statement_Block
+       , New_FunctionSignature, New_Statement_List, New_Statement_Block
        , New_Statement_If, New_Statement_Return, New_Statement_While, New_Statement_Throw
        , New_Statement_Expression
-       , New_Expression_Symbol, New_Expression_Literal
+       , New_Expression_Symbol, New_Expression_Literal, New_Expression_Grouping
        , New_Expression_List, New_Expression_Array, New_Expression_Object, New_Expression_Pair
-       , New_Expression_UnaryPrefix, New_Expression_Binary
+       , New_Expression_UnaryPrefix, New_Expression_PostCircumfix, New_Expression_Binary, New_Expression_Ternary
        , New_Expression_Apply
        , New_Literal_Fixnum, New_Literal_Boolean, New_Literal_String
        , New_Literal_Function, New_Literal_ArrowFunctionExpression
@@ -26,54 +26,83 @@ function SjsParser(lexer) {
   return NewParser('sjs', lexer);
 }
 
-function strip_sites(tree) {
+function strip_locations(tree) {
   if (tree !== null && typeof(tree) === 'object') {
     if (tree.hasOwnProperty('Loc')) {
       delete(tree.Loc);
     }
-    if (tree.Kind === 'Literal' && tree.Tag === 'Function' && tree.hasOwnProperty('Fn')) {
-      delete(tree.Fn);
-    }
     for (const key of Object.keys(tree)) {
-      strip_sites(tree[key]);
+      strip_locations(tree[key]);
     }
   }
   return tree;
 }
 
 function parse(parser) {
-  return strip_sites(Parse(parser).Just);
+  return strip_locations(Parse(parser).Just);
 }
 
-let site = { Kind: 'Loc', File: '', Line: 1, Column: 999, Offset: 999 };
-let token = { Kind: 'Token', Type: 'FIXNUM', Text: '', Loc: site };
+let loc = { Kind: 'Loc', File: '', Line: 1, Column: 999, Offset: 999 };
+let token = { Kind: 'Token', Type: 'FIXNUM', Text: '', Loc: loc };
+let fnToken = { Kind: 'Token', Type: 'function', Text: 'function', Loc: loc };
+
+// Build a Token containing the given Type and Text
+function tok(type, text) {
+  return { Kind: 'Token', Type: type, Text: text, Loc: loc };
+}
+let plus = () => tok('PLUS', '+');
+let minus = () => tok('MINUS', '-');
+let star = () => tok('STAR', '*');
+let slash = () => tok('SLASH', '/');
+let question = () => tok('QUESTION', '?');
+let colon = () => tok('COLON', ':');
+let lparen = () => tok('LPAREN', '(');
+let rparen = () => tok('RPAREN', ')');
+let lbrack = () => tok('LBRACK', '[');
+let rbrack = () => tok('RBRACK', ']');
+let lbrace = () => tok('LBRACE', '{');
+let rbrace = () => tok('RBRACE', '}');
+let arrow = () => tok('ARROW', '=>');
+
+function kw(text) {
+  return { Kind: 'Token', Type: text, Text: text, Loc: loc };
+}
+
+function symtok(text) {
+  return tok('SYMBOL', text);
+}
 
 // Build an Expression containing an integer literal.
 function int(spelling) {
-  let site = { Kind: 'Loc', File: '', Line: 1, Column: 99, Offset: 99 };
-  let token = { Kind: 'Token', Type: 'FIXNUM', Text: spelling, Loc: site };
+  if (typeof(spelling) === 'number') { spelling = `${spelling}`; }
+  let loc = { Kind: 'Loc', File: '', Line: 1, Column: 99, Offset: 99 };
+  let token = { Kind: 'Token', Type: 'FIXNUM', Text: spelling, Loc: loc };
   return New_Expression_Literal(New_Literal_Fixnum(token));
 }
 
 // Build an Expression containing a string literal.
 function str(spelling) {
-  let site = { Kind: 'Loc', File: '', Line: 1, Column: 99, Offset: 99 };
-  let token = { Kind: 'Token', Type: 'STRING', Text: spelling, Loc: site };
+  let loc = { Kind: 'Loc', File: '', Line: 1, Column: 99, Offset: 99 };
+  let token = { Kind: 'Token', Type: 'STRING', Text: spelling, Loc: loc };
   return New_Expression_Literal(New_Literal_String(token));
 }
 
 function sym(spelling) {
-  let site = { Kind: 'Loc', File: '', Line: 1, Column: 99, Offset: 99 };
-  let token = { Kind: 'Token', Type: 'SYMBOL', Text: spelling, Loc: site };
-  return strip_sites(New_Expression_Symbol(token));
+  let loc = { Kind: 'Loc', File: '', Line: 1, Column: 99, Offset: 99 };
+  let token = { Kind: 'Token', Type: 'SYMBOL', Text: spelling, Loc: loc };
+  return strip_locations(New_Expression_Symbol(token));
 }
 
-function pair(k, v) {
-  return New_Expression_Pair(k, v);
+function pair(maybe_op, k, v) {
+  return New_Expression_Pair(maybe_op, k, v);
 }
 
-function list(exprs) {
-  return New_Expression_List(exprs);
+function plist(exprs) {
+  return New_Expression_List(tok('LPAREN', '('), tok('RPAREN', ')'), exprs, false);
+}
+
+function blist(exprs) {
+  return New_Expression_List(tok('LBRACK', '['), tok('RBRACK', ']'), exprs, false);
 }
 
 function let_statement(lhs, rhs) {
@@ -94,14 +123,14 @@ function singleDefinitionProgram(definition) {
   let name = None('ModuleName');
   let imports = [ ];
   let decls = [definition] ;
-  return strip_sites(New_Unit(name, imports, decls, ''));
+  return strip_locations(New_Unit(name, imports, decls, ''));
 }
 
 // Build a Unit for a program that contains only an expression
 // (e.g., an input file that contains only "7").
 function expressionProgram(expr) {
   let prog = singleDefinitionProgram(New_Declaration_Statement(New_Statement_Expression(expr)));
-  return strip_sites(prog);
+  return strip_locations(prog);
 }
 
 // Expressions like `a  +  b * c`, where the right-hand op has higher precedence.
@@ -153,18 +182,18 @@ describe("SimpleJS Parser", function () {
 
   it("should return ExpressionStatement on '44'", function () {
     let parser = SjsParser(SjsLexer("44;"));
-    expect(parse(parser)).to.deep.equal(expressionProgram(int("44")));
+    expect(parse(parser)).to.deep.equal(expressionProgram(int(44)));
   });
 
   it("should return ExpressionStatement on '-1'", function () {
     let parser = SjsParser(SjsLexer("-002;"));
-    let neg1 = New_Expression_UnaryPrefix('-', int("002"));
+    let neg1 = New_Expression_UnaryPrefix(minus(), int("002"));
     expect(parse(parser)).to.deep.equal(expressionProgram(neg1));
   });
 
   it("should return ExpressionStatement on '+1'", function () {
     let parser = SjsParser(SjsLexer("+003;"));
-    let neg1 = New_Expression_UnaryPrefix('+', int("003"));
+    let neg1 = New_Expression_UnaryPrefix(plus(), int("003"));
     expect(parse(parser)).to.deep.equal(expressionProgram(neg1));
   });
 
@@ -173,7 +202,7 @@ describe("SimpleJS Parser", function () {
     let one = int("1");
     let two = int("2");
     let three = int("3");
-    expect(parse(parser)).to.deep.equal(expressionProgram(aBC(one, '+', two, '*', three)));
+    expect(parse(parser)).to.deep.equal(expressionProgram(aBC(one, plus(), two, star(), three)));
   });
 
   it("should get the precedence right on '4/5-6'", function () {
@@ -181,41 +210,56 @@ describe("SimpleJS Parser", function () {
     let four = int("4");
     let five = int("5");
     let six = int("6");
-    expect(parse(parser)).to.deep.equal(expressionProgram(ABc(four, '/', five, '-', six)));
+    expect(parse(parser)).to.deep.equal(expressionProgram(ABc(four, slash(), five, minus(), six)));
   });
 
   it("should get the precedence right on '1+2*3/4-5'", function () {
     let parser = SjsParser(SjsLexer("1+2*3/4-5;"));
-    let x234 = ABc(int("2"), '*', int("3"), '/', int("4"));
-    let expr = ABc(int("1"), '+', x234, '-', int("5"));
+    let x234 = ABc(int("2"), star(), int("3"), slash(), int("4"));
+    let expr = ABc(int("1"), plus(), x234, minus(), int("5"));
     expect(parse(parser)).to.deep.equal(expressionProgram(expr));
   });
 
   it("should give unary minus highest precedence in '-x*y'", function () {
     let parser = SjsParser(SjsLexer("-x*y;"));
-    let negX = New_Expression_UnaryPrefix('-', sym("x"));
-    let expr = New_Expression_Binary('*', negX, sym("y"));
+    let negX = New_Expression_UnaryPrefix(minus(), sym("x"));
+    let expr = New_Expression_Binary(star(), negX, sym("y"));
     expect(parse(parser)).to.deep.equal(expressionProgram(expr));
   });
 
   it("should parse parenthesized expression lists", function() {
     let parser = SjsParser(SjsLexer('(1, 2, 3);'));
-    let expr = list([int("1"), int("2"), int("3")]);
+    let expr = plist([int("1"), int("2"), int("3")]);
     expect(parse(parser)).to.deep.equal(expressionProgram(expr));
+  });
+
+  it("should parse indexes (subscripts/array access)", function() {
+    let parser = SjsParser(SjsLexer('a[1];'));
+    let expr = New_Expression_PostCircumfix(lbrack(), rbrack(), sym('a'), int(1));
+    expect(parse(parser)).to.deep.equal(expressionProgram(expr));
+  });
+
+  describe("should parse ternary operators", function() {
+    it("as if-then-elsif-then", function() {
+      let parser = SjsParser(SjsLexer('1 ? 2 : 3 ? 4 : 5;'));
+      let nestedExpr = New_Expression_Ternary(question(), colon(), int("3"), int("4"), int("5"));
+      let expr = New_Expression_Ternary(question(), colon(), int("1"), int("2"), nestedExpr);
+      expect(parse(parser)).to.deep.equal(expressionProgram(expr));
+    });
   });
 
   describe("should parse array constructors", function() {
     it("that are empty", function() {
       let parser = SjsParser(SjsLexer('[ ];'));
-      let expr = New_Expression_Array([ ]);
+      let expr = New_Expression_Array(blist([ ]));
       expect(parse(parser)).to.deep.equal(expressionProgram(expr));
     });
     it("that have contents", function() {
       let parser = SjsParser(SjsLexer('[p, (q,r), s];'));
       let a1 = sym("p");
-      let a2 = list([sym("q"), sym("r")]);
+      let a2 = plist([sym("q"), sym("r")]);
       let a3 = sym("s");
-      let expr = New_Expression_Array([a1, a2, a3]);
+      let expr = New_Expression_Array(blist([a1, a2, a3]));
       expect(parse(parser)).to.deep.equal(expressionProgram(expr));
     });
   });
@@ -223,16 +267,16 @@ describe("SimpleJS Parser", function () {
   describe("should parse object constructors", function() {
     it("that are empty", function() {
       let parser = SjsParser(SjsLexer('{ };'));
-      let expr = New_Expression_Object([ ]);
+      let expr = New_Expression_Object(lbrace(), rbrace(), [ ]);
       expect(parse(parser)).to.deep.equal(expressionProgram(expr));
     });
     it("that have contents", function() {
       let parser = SjsParser(SjsLexer('{H: 1, "He": 2, Li: (3,4), Be};'));
-      let a1 = pair(sym("H"), Just(int("1")));
-      let a2 = pair(str('"He"'), Just(int("2")));
-      let a3 = pair(sym("Li"), Just(list([int("3"), int("4")])));
-      let a4 = pair(sym("Be"), None('Expression'));
-      let expr = New_Expression_Object([a1, a2, a3, a4]);
+      let a1 = pair(Just(colon()), sym("H"), Just(int("1")));
+      let a2 = pair(Just(colon()), str('"He"'), Just(int("2")));
+      let a3 = pair(Just(colon()), sym("Li"), Just(plist([int("3"), int("4")])));
+      let a4 = pair(None('Token'), sym("Be"), None('Expression'));
+      let expr = New_Expression_Object(lbrace(), rbrace(), [a1, a2, a3, a4]);
       expect(parse(parser)).to.deep.equal(expressionProgram(expr));
     });
   });
@@ -245,14 +289,14 @@ describe("SimpleJS Parser", function () {
   describe("should parse variable declarations", function() {
     it("with a single variable", function() {
       let parser = SjsParser(SjsLexer("let x = 54;"));
-      let stmt = let_statement('x', int("54"));
+      let stmt = let_statement('x', int(54));
       let unit = singleDefinitionProgram(stmt);
       expect(parse(parser)).to.deep.equal(unit);
     });
     it("with multiple variables", function() {
       let parser = SjsParser(SjsLexer("let [x, y] = [55, 56];"));
       let functor = sym("f");
-      let stmt = let_statement(["x", "y"], New_Expression_Array([int("55"), int("56")]));
+      let stmt = let_statement(["x", "y"], New_Expression_Array(blist([int(55), int(56)])));
       let unit = singleDefinitionProgram(stmt);
       expect(parse(parser)).to.deep.equal(unit);
     });
@@ -266,28 +310,28 @@ describe("SimpleJS Parser", function () {
     it("with zero arguments", function() {
       let parser = SjsParser(SjsLexer("f();"));
       let functor = sym("f");
-      let stmt = New_Statement_Expression(New_Expression_Apply(functor, []));
+      let stmt = New_Statement_Expression(New_Expression_Apply(functor, plist([])));
       let unit = singleDefinitionProgram(New_Declaration_Statement(stmt));
       expect(parse(parser)).to.deep.equal(unit);
     });
     it("with one argument", function() {
       let parser = SjsParser(SjsLexer("f(48);"));
       let functor = sym("f");
-      let stmt = New_Statement_Expression(New_Expression_Apply(functor, [int("48")]));
+      let stmt = New_Statement_Expression(New_Expression_Apply(functor, plist([int(48)])));
       let unit = singleDefinitionProgram(New_Declaration_Statement(stmt));
       expect(parse(parser)).to.deep.equal(unit);
     });
     it("with two arguments", function() {
       let parser = SjsParser(SjsLexer("f(49,50);"));
       let functor = sym("f");
-      let stmt = New_Statement_Expression(New_Expression_Apply(functor, [int("49"), int("50")]));
+      let stmt = New_Statement_Expression(New_Expression_Apply(functor, plist([int(49), int(50)])));
       let unit = singleDefinitionProgram(New_Declaration_Statement(stmt));
       expect(parse(parser)).to.deep.equal(unit);
     });
     it("with three arguments", function() {
       let parser = SjsParser(SjsLexer("f(49,(56,57),50);"));
       let functor = sym("f");
-      let args = [int("49"), list([int("56"), int("57")]), int("50")];
+      let args = plist([int(49), plist([int(56), int(57)]), int(50)]);
       let stmt = New_Statement_Expression(New_Expression_Apply(functor, args));
       let unit = singleDefinitionProgram(New_Declaration_Statement(stmt));
       expect(parse(parser)).to.deep.equal(unit);
@@ -297,25 +341,25 @@ describe("SimpleJS Parser", function () {
   describe("should parse `new` expression", function() {
     it("with no parameter list", function() {
       let parser = SjsParser(SjsLexer("new X;"));
-      let stmt = New_Statement_Expression(New_Expression_UnaryPrefix('new', sym("X")));
+      let stmt = New_Statement_Expression(New_Expression_UnaryPrefix(kw('new'), sym("X")));
       let unit = singleDefinitionProgram(New_Declaration_Statement(stmt));
       expect(parse(parser)).to.deep.equal(unit);
     });
     it("with zero arguments", function() {
       let parser = SjsParser(SjsLexer("new X();"));
-      let stmt = New_Statement_Expression(New_Expression_Binary('new', sym("X"), list([])));
+      let stmt = New_Statement_Expression(New_Expression_Binary(kw('new'), sym("X"), plist([])));
       let unit = singleDefinitionProgram(New_Declaration_Statement(stmt));
       expect(parse(parser)).to.deep.equal(unit);
     });
     it("with one argument", function() {
       let parser = SjsParser(SjsLexer("new X(51);"));
-      let stmt = New_Statement_Expression(New_Expression_Binary('new', sym("X"), list([int("51")])));
+      let stmt = New_Statement_Expression(New_Expression_Binary(kw('new'), sym("X"), plist([int(51)])));
       let unit = singleDefinitionProgram(New_Declaration_Statement(stmt));
       expect(parse(parser)).to.deep.equal(unit);
     });
     it("with two arguments", function() {
       let parser = SjsParser(SjsLexer("new X(52, 53);"));
-      let stmt = New_Statement_Expression(New_Expression_Binary('new', sym("X"), list([int("52"), int("53")])));
+      let stmt = New_Statement_Expression(New_Expression_Binary(kw('new'), sym("X"), plist([int(52), int(53)])));
       let unit = singleDefinitionProgram(New_Declaration_Statement(stmt));
       expect(parse(parser)).to.deep.equal(unit);
     });
@@ -340,12 +384,13 @@ describe("SimpleJS Parser", function () {
     });
     it("should handle a single statement in body of `if`", function() {
       let parser = SjsParser(SjsLexer("if (true) { 43; }"));
-      let site = { Kind: 'Loc', File: '', Line: 1, Column: 5, Offset: 4 };
-      let lit = { Value: true, Text: "true", Loc: site };
-      let test = New_Expression_Literal(New_Literal_Boolean(lit));
-      let body = New_Statement_Block([New_Declaration_Statement(New_Statement_Expression(int("43")))]);
-      let stmt = New_Statement_If(test, body, None('Statement'));
-      let unit = strip_sites(singleDefinitionProgram(New_Declaration_Statement(stmt)));
+      let loc = { Kind: 'Loc', File: '', Line: 1, Column: 5, Offset: 4 };
+      let lit = { Value: true, Text: "true", Loc: loc };
+      let test = New_Expression_Grouping(lparen(), rparen(), New_Expression_Literal(New_Literal_Boolean(lit)));
+      let body = New_Statement_Block(lbrace(), rbrace(),
+        [New_Declaration_Statement(New_Statement_Expression(int(43)))]);
+      let stmt = New_Statement_If(kw('if'), None('Token'), None('Token'), test, body, None('Statement'));
+      let unit = strip_locations(singleDefinitionProgram(New_Declaration_Statement(stmt)));
       expect(parse(parser)).to.deep.equal(unit);
     });
   });
@@ -369,12 +414,13 @@ describe("SimpleJS Parser", function () {
     });
     it("should handle a single statement in body of `while`", function() {
       let parser = SjsParser(SjsLexer("while (true) { 43; }"));
-      let site = { Kind: 'Loc', File: '', Line: 1, Column: 8, Offset: 7 };
-      let lit = { Value: true, Text: "true", Loc: site };
+      let loc = { Kind: 'Loc', File: '', Line: 1, Column: 8, Offset: 7 };
+      let lit = { Value: true, Text: "true", Loc: loc };
       let test = New_Expression_Literal(New_Literal_Boolean(lit));
-      let body = New_Statement_Block([New_Declaration_Statement(New_Statement_Expression(int("43")))]);
+      let body = New_Statement_Block(lbrace(), rbrace(),
+        [New_Declaration_Statement(New_Statement_Expression(int(43)))]);
       let stmt = New_Statement_While(test, body);
-      let unit = strip_sites(singleDefinitionProgram(New_Declaration_Statement(stmt)));
+      let unit = strip_locations(singleDefinitionProgram(New_Declaration_Statement(stmt)));
       expect(parse(parser)).to.deep.equal(unit);
     });
   });
@@ -398,18 +444,18 @@ describe("SimpleJS Parser", function () {
     });
     it("should parse a function", function () {
       let parser = SjsParser(SjsLexer("function f() { }"));
-      let sig = New_FunctionSignature([]);
-      let body = New_Statement_Block([]);
+      let sig = New_FunctionSignature(lparen(), rparen(), []);
+      let body = New_Statement_Block(lbrace(), rbrace(), []);
       let decl = New_Declaration_Function("f", sig, body, false, false);
       let unit = singleDefinitionProgram(decl);
       expect(parse(parser)).to.deep.equal(unit);
     });
     it("should handle a function literal", function () {
       let parser = SjsParser(SjsLexer("let f = function () { return 45; };"));
-      let sig = New_FunctionSignature([]);
-      let ret = New_Declaration_Statement(New_Statement_Return(Just(int("45"))));
-      let body = New_Statement_Block([ret]);
-      let expr = New_Expression_Literal(New_Literal_Function(token, '', sig, body));
+      let sig = New_FunctionSignature(lparen(), rparen(), []);
+      let ret = New_Declaration_Statement(New_Statement_Return(Just(int(45))));
+      let body = New_Statement_Block(lbrace(), rbrace(), [ret]);
+      let expr = New_Expression_Literal(New_Literal_Function(fnToken, symtok(''), sig, body));
       let decl = let_statement('f', expr);
       let unit = singleDefinitionProgram(decl);
       expect(parse(parser)).to.deep.equal(unit);
@@ -419,8 +465,8 @@ describe("SimpleJS Parser", function () {
   it("should parse arrow functions", function() {
     let parser = SjsParser(SjsLexer("let x = () => f(46, 47);"));
     let functor = sym("f");
-    let body = New_Expression_Apply(functor, [int("46"), int("47")]);
-    let expr = New_Expression_Literal(New_Literal_ArrowFunctionExpression([], body));
+    let body = New_Expression_Apply(functor, plist([int(46), int(47)]));
+    let expr = New_Expression_Literal(New_Literal_ArrowFunctionExpression(arrow(), plist([]), body));
     let decl = let_statement('x', expr);
     let unit = singleDefinitionProgram(decl);
     expect(parse(parser)).to.deep.equal(unit);
@@ -469,12 +515,32 @@ describe("SimpleJS Parser", function () {
       "Signature": {
         "Kind": "FunctionSignature",
         "Tag": "FunctionSignature",
+        "DelimiterLeft": {
+          "Kind": "Token",
+          "Type": "LPAREN",
+          "Text": "("
+        },
+        "DelimiterRight": {
+          "Kind": "Token",
+          "Type": "RPAREN",
+          "Text": ")"
+        },
         "FormalParameters": []
       },
       "Body": {
         "Kind": "Statement",
         "Tag": "Block",
-        "Declarations": [
+        "Opener": {
+          "Kind": "Token",
+          "Type": "LBRACE",
+          "Text": "{"
+        },
+        "Closer": {
+          "Kind": "Token",
+          "Type": "RBRACE",
+          "Text": "}"
+        },
+        "Statements": [
           {
             "Kind": "Declaration",
             "Tag": "Statement",

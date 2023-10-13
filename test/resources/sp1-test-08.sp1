@@ -1,0 +1,45 @@
+// module main;
+let LanguageVersion = '0.0.1'; // Spectra 0.0.1
+
+
+// test if, else if
+
+fn test_if(a) do
+  if a < 10 then
+    console.log(`${a} < 10`);
+  else
+    console.log(`10 <= ${a}`);
+  end
+end
+
+fn test_elsif(a, b) do
+  if a < b then
+    console.log(`${a} < ${b}`);
+  elsif a === b then
+    console.log(`${a} === ${b}`);
+  elsif a > b then
+    console.log(`${a} > ${b}`);
+  else
+    console.log(`${a} ? ${b}`);
+  end
+end
+
+fn main() do
+  test_if(7);
+  test_if(18);
+  test_elsif(1, 2);
+  test_elsif(3, 3);
+  test_elsif(5, 4);
+  test_elsif(6, 7 / 0);
+  test_elsif(Math.sqrt(-1), 8);
+end
+
+main();
+// OUTPUT:
+// 7 < 10
+// 10 <= 18
+// 1 < 2
+// 3 === 3
+// 5 > 4
+// 6 < Infinity
+// NaN ? 8
