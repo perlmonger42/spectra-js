@@ -7,7 +7,7 @@ trap 'rm -rf $TMPDIR' EXIT
 
 ##### All this effort, and it doesn't work. The `[[ -n ... ]]` expression always
 ##### tests true, whether there or not there are any x.compiled.y files. So just do...
-rm -f ./**/*.compiled.*(N)
+find . -name '*.compiled.mjs' -delete
 ##### ... which might delete '' which never exists but the -f makes it not fail.
 ##### # The `(N)` Glob Qualifier tells zsh to expand to '' if the glob has no matches.
 ##### # The `(Y1)` Glob Qualifier tells zsh to expand to no more than 1 match.
@@ -31,7 +31,8 @@ echo "===== Test original transpiler in tmp/0_js ====="
 mkdir -p $TMPDIR/0_js
 cp -R . $TMPDIR/0_js
 cd $TMPDIR/0_js
-npm test && node cmd/run-tests.mjs
+npm test
+node cmd/run-tests.mjs
 tree --gitignore $TMPDIR/0_js
 
 
@@ -61,7 +62,9 @@ tree --gitignore $TMPDIR/2_js
 cd $TMPDIR/2_js
 npm install
 echo "===== Testing transpiled transpiler in tmp/2_js ====="
-npm test && node cmd/run-tests.mjs && node cmd/prism.mjs --verbose src/*.mjs cmd/*.mjs
+npm test
+node cmd/run-tests.mjs
+node cmd/prism.mjs --verbose src/*.mjs cmd/*.mjs
 
 
 ### use tmp/2_js transpiler to transpile tmp/2_js sjs => spectra => sjs
@@ -89,6 +92,8 @@ tree --gitignore $TMPDIR/4_js
 echo "===== Testing transpiled transpiler ====="
 cd $TMPDIR/4_js
 npm install
-npm test && node cmd/run-tests.mjs && node cmd/prism.mjs --verbose src/*.mjs cmd/*.mjs
+npm test
+node cmd/run-tests.mjs
+node cmd/prism.mjs --verbose src/*.mjs cmd/*.mjs
 
 tree --gitignore $TMPDIR

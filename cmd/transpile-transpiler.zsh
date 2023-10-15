@@ -1,4 +1,5 @@
 #!/usr/bin/env zsh
+set -e  # exit on any error
 
 TMPDIR=$(mktemp -d /tmp/prism.XXXXXX)
 trap 'rm -rf $TMPDIR' EXIT
@@ -19,6 +20,8 @@ npm install
 
 # test the transpiled version of the transpiler
 echo "===== Testing transpiled transpiler ====="
-npm test && node cmd/run-tests.mjs && node cmd/prism.mjs --verbose src/*.mjs cmd/*.mjs
+npm test
+node cmd/run-tests.mjs
+node cmd/prism.mjs --verbose src/*.mjs cmd/*.mjs
 
 tree --gitignore $TMPDIR
