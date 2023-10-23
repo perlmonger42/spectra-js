@@ -6,12 +6,12 @@ import { InternalError, NewParser, Parse
        , New_Declaration_Function, New_Declaration_Variable, New_Declaration_Variables
        , New_Declaration_Statement
        , New_FunctionSignature, New_Statement_List, New_Statement_Block
-       , New_Statement_If, New_Statement_Return, New_Statement_While, New_Statement_Throw
+       , New_Statement_If, New_Statement_Return, New_Statement_While, New_Statement_For, New_Statement_Throw
        , New_Statement_Expression
        , New_Expression_Symbol, New_Expression_Literal, New_Expression_Grouping
        , New_Expression_List, New_Expression_Array, New_Expression_Object, New_Expression_Pair
        , New_Expression_UnaryPrefix, New_Expression_PostCircumfix, New_Expression_Binary, New_Expression_Ternary
-       , New_Expression_Apply
+       , New_Expression_Apply, New_List_Identifiers
        , New_Literal_Fixnum, New_Literal_Boolean, New_Literal_String
        , New_Literal_Function, New_Literal_ArrowFunctionExpression
        , describe_value, parseString
@@ -108,10 +108,12 @@ function blist(exprs) {
 function let_statement(lhs, rhs) {
   if (typeof(lhs) === 'string') {
     rhs = rhs === null ? None('Expression') : Just(rhs);
-    return New_Declaration_Variable('let', lhs, rhs, false);
+    return New_Declaration_Variable(kw('let'), lhs, rhs, false);
   } else if (typeof(lhs) === 'object' && Array.isArray(lhs)) {
-    //assert_is_list_of("lhs", lhs, 'string');
-    return New_Declaration_Variables('let', lhs, rhs, false);
+    let commas = lhs.map((_) => tok('COMMA', ','));
+    commas = commas.slice(0, commas.length - 1);
+    let vars = New_List_Identifiers(lhs, commas);
+    return New_Declaration_Variables(kw('let'), vars, rhs, false);
   } else {
     console.error(`let_statement: unexpected type of lhs: ${describe_value(lhs)}`);
   }
@@ -296,7 +298,8 @@ describe("SimpleJS Parser", function () {
     it("with multiple variables", function() {
       let parser = SjsParser(SjsLexer("let [x, y] = [55, 56];"));
       let functor = sym("f");
-      let stmt = let_statement(["x", "y"], New_Expression_Array(blist([int(55), int(56)])));
+      let vars = [tok('SYMBOL', 'x'), tok('SYMBOL', 'y')];
+      let stmt = let_statement(vars, New_Expression_Array(blist([int(55), int(56)])));
       let unit = singleDefinitionProgram(stmt);
       expect(parse(parser)).to.deep.equal(unit);
     });
@@ -419,7 +422,36 @@ describe("SimpleJS Parser", function () {
       let test = New_Expression_Literal(New_Literal_Boolean(lit));
       let body = New_Statement_Block(lbrace(), rbrace(),
         [New_Declaration_Statement(New_Statement_Expression(int(43)))]);
-      let stmt = New_Statement_While(test, body);
+      let stmt = New_Statement_While(kw('while'), test, body);
+      let unit = strip_locations(singleDefinitionProgram(New_Declaration_Statement(stmt)));
+      expect(parse(parser)).to.deep.equal(unit);
+    });
+  });
+
+  describe("should parse for statements correctly", function() {
+    it("should require a parenthesis after `for`", function() {
+      let parser = SjsParser(SjsLexer("for [ ] { }"));
+      expect(() => Parse(parser).Just).to.throw(SyntaxError, new RegExp('expected `\\(`'));
+    });
+    it("should require a parenthesis after test expression", function() {
+      let parser = SjsParser(SjsLexer("for (var x of a { }"));
+      expect(() => Parse(parser).Just).to.throw(SyntaxError, new RegExp('expected `\\)`'));
+    });
+    it("should require a curly brace to start body", function() {
+      let parser = SjsParser(SjsLexer("for (let x of a) [ ]"));
+      expect(() => Parse(parser).Just).to.throw(SyntaxError, new RegExp('expected `{`'));
+    });
+    it("should require a curly brace to end body", function() {
+      let parser = SjsParser(SjsLexer("for (const x of a) { ]"));
+      expect(() => Parse(parser).Just).to.throw(SyntaxError, new RegExp('expected DECLARATION or `}`'));
+    });
+    it("should handle a single statement in body of `for`", function() {
+      let parser = SjsParser(SjsLexer("for (x of a) { 58; }"));
+      let body = New_Statement_Block(lbrace(), rbrace(),
+        [New_Declaration_Statement(New_Statement_Expression(int(58)))]);
+      let varKw = None('Token');
+      let vars = New_List_Identifiers([tok('SYMBOL', 'x')], []);
+      let stmt = New_Statement_For(kw('for'), varKw, vars, sym("a"), body, false);
       let unit = strip_locations(singleDefinitionProgram(New_Declaration_Statement(stmt)));
       expect(parse(parser)).to.deep.equal(unit);
     });
@@ -444,7 +476,7 @@ describe("SimpleJS Parser", function () {
     });
     it("should parse a function", function () {
       let parser = SjsParser(SjsLexer("function f() { }"));
-      let sig = New_FunctionSignature(lparen(), rparen(), []);
+      let sig = New_FunctionSignature(lparen(), rparen(), New_List_Identifiers([],[]));
       let body = New_Statement_Block(lbrace(), rbrace(), []);
       let decl = New_Declaration_Function("f", sig, body, false, false);
       let unit = singleDefinitionProgram(decl);
@@ -452,8 +484,8 @@ describe("SimpleJS Parser", function () {
     });
     it("should handle a function literal", function () {
       let parser = SjsParser(SjsLexer("let f = function () { return 45; };"));
-      let sig = New_FunctionSignature(lparen(), rparen(), []);
-      let ret = New_Declaration_Statement(New_Statement_Return(Just(int(45))));
+      let sig = New_FunctionSignature(lparen(), rparen(), New_List_Identifiers([],[]));
+      let ret = New_Declaration_Statement(New_Statement_Return(kw('return'), Just(int(45))));
       let body = New_Statement_Block(lbrace(), rbrace(), [ret]);
       let expr = New_Expression_Literal(New_Literal_Function(fnToken, symtok(''), sig, body));
       let decl = let_statement('f', expr);
@@ -485,7 +517,7 @@ describe("SimpleJS Parser", function () {
 
     it("should recognize an empty module xyz", function() {
       let parser = SjsParser(SjsLexer("module xyz;"));
-      let name = Just(New_ModuleName('xyz'));
+      let name = strip_locations(Just(New_ModuleName(tok('module', 'module'), tok('SYMBOL', 'xyz'))));
       expect(parse(parser)).to.deep.equal(New_Unit(name, [], [], ''));
     });
 
@@ -503,7 +535,16 @@ describe("SimpleJS Parser", function () {
     "Just": {
       "Kind": "ModuleName",
       "Tag": "ModuleName",
-      "Name": "testModule"
+      "Module": {
+        "Kind": "Token",
+        "Type": "module",
+        "Text": "module"
+      },
+      "Name": {
+        "Kind": "Token",
+        "Type": "SYMBOL",
+        "Text": "testModule"
+      }
     }
   },
   "ImportList": [],
@@ -525,7 +566,12 @@ describe("SimpleJS Parser", function () {
           "Type": "RPAREN",
           "Text": ")"
         },
-        "FormalParameters": []
+        "FormalParameters": {
+          "Kind": "List",
+          "Tag": "Identifiers",
+          "Identifiers": [],
+          "Commas": []
+        }
       },
       "Body": {
         "Kind": "Statement",

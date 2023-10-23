@@ -101,9 +101,9 @@ export function describe(value, maxlen) {
   } else if (isNone(value)) {
     return truncate_and_surround('None(', value.Type, ')', maxlen);
   } else if (isJust(value)) {
-    return truncate_and_surround('Just(', value.Just, ')', maxlen);
+    return truncate_and_surround('Just(', describe(value.Just, maxlen-6), ')', maxlen);
   } else if (isOk(value)) {
-    return truncate_and_surround('Ok(', value.Value, ')', maxlen);
+    return truncate_and_surround('Ok(', describe(value.Value, maxlen-4), ')', maxlen);
   } else if (isErr(value)) {
     return truncate_and_surround('Err(', value.Error, ')', maxlen);
   } else if (type === 'object' && typeof(value.Kind) === 'string') {
@@ -268,6 +268,14 @@ export function assert_is_list_of(value_name, value, element_type_asserter) {
     index++;
     element_type_asserter(`${value_name}[${index}]`, value[index]);
   }
+}
+
+export function token_asserter() {
+  return function(value_name, value) { assert_is_token(value_name, value); };
+}
+
+export function token_type_asserter(type) {
+  return function(value_name, value) { assert_is_token_type(value_name, value, type); };
 }
 
 export function string_asserter() {
@@ -469,17 +477,17 @@ function skip(parser, type) {
 }
 
 // skip_any([TYPE1, TYPE2, ...]) checks the current token, and if it is any of the TYPEn,
-// it returns the current token and advances the input; otherwise, returns null.
+// it returns Just(curtok(parser)) and advances the input; otherwise, returns None('Token').
 function skip_any(parser, types) {
-  let token = parser.current_token;
+  let token = curtok(parser);
   let index = -1;
   while (index+1 < types.length) {
     index++;
     if (skip(parser, types[index])) {
-      return token;
+      return Just(token);
     }
   }
-  return false;
+  return None('Token');
 }
 
 // expect(TYPE) returns the current token and advances the input iff peek === TYPE;
@@ -503,21 +511,24 @@ function expect(parser, type, message) {
 
 function identifier_list(parser) {
   //console.log(`identifier_list, at ${showCurrentToken(parser)}`);
-  let identifier_list = [];
+  let identifiers = [];
+  let commas = [];
 
   while (true) {
     let identifier = skip(parser, 'SYMBOL');
     if (!identifier) {
       break;  // throw NewSyntaxError("expected IDENTIFIER", curtok(parser));
     }
-    identifier_list.push(identifier.Text);
-    if (!skip(parser, 'COMMA')) {
+    identifiers.push(identifier);
+    let comma = skip(parser, 'COMMA');
+    if (!comma) {
       break;
     }
+    commas.push(comma);
   }
   //console.log(`identifier_list, at ${showCurrentToken(parser)}`);
 
-  return identifier_list;
+  return New_List_Identifiers(identifiers, commas);
 }
 
 function optional_identifier_list(parser) {
@@ -528,7 +539,7 @@ function optional_identifier_list(parser) {
     return list;
   }
   //console.log(`after peek(SYMBOL) in optional_identifier_list, at ${showCurrentToken(parser)}`);
-  return [ ];
+  return New_List_Identifiers([], []);
 }
 
 export function New_Literal_Boolean(Token) {
@@ -1065,7 +1076,7 @@ export function New_Statement_If(If, Then, End, Test, Body, Else) {
 }
 
 function if_statement_sp1(parser, ifOrElsifToken, captureEndToken) {
-  // The 'if' or 'elsif' has already been skipped.
+  // The 'if' or 'elsif' has already been consumed.
   if (!match_any(parser, parser.initial_expression_tokens)) {
     expect(parser, 'EXPRESSION', "expected EXPRESSION after `if`");
   }
@@ -1095,7 +1106,7 @@ function maybe_else_statement_sp1(parser, captureEndToken) {
 }
 
 function if_statement_sjs(parser, ifToken) {
-  // The 'if' has already been skipped.
+  // The 'if' has already been consumed.
   let opener = expect(parser, 'LPAREN', "expected `(` after `if`");
   let test = expr(parser);
   let closer = expect(parser, 'RPAREN', "expected `)` after `if (EXPRESSION`");
@@ -1121,69 +1132,55 @@ function if_statement(parser) {
   return parser.is_spectra ? if_statement_sp1(parser, ifToken, {}) : if_statement_sjs(parser, ifToken);
 }
 
-export function New_Statement_While(Test, Body) {
+export function New_Statement_While(While, Test, Body) {
+  assert_is_token_equal("New_Statement_While.While", While, 'while');
   assert_is_kind("New_Statement_While.Test", Test, 'Expression');
   assert_is_kind_tag("New_Statement_While.Body", Body, 'Statement', 'Block');
-  return { Kind: 'Statement', Tag: 'While', Test, Body };
-}
-
-function test_expression(parser, kw, kw_after_test) {
-  let test;
-  if (parser.is_spectra) {
-    if (!match_any(parser, parser.initial_expression_tokens)) {
-      expect(parser, 'EXPRESSION', "expected EXPRESSION after \`${kw}\`");
-    }
-    test = expr(parser);
-    if (!match(parser, kw_after_test)) {
-      expect(parser, 'UNMATCHABLE', `expected \`${kw_after_test}\` after \`${kw} EXPRESSION\``);
-    }
-    return test;
-  } else {
-    expect(parser, 'LPAREN', "expected \`(\` after \`${kw}\`");
-    test = expr(parser);
-    expect(parser, 'RPAREN', "expected \`)\` after \`${kw} (EXPRESSION\`");
-  }
-  return test;
+  return { Kind: 'Statement', Tag: 'While', While, Test, Body };
 }
 
 function while_statement_sp1(parser) {
-  // The 'while' has already been skipped.
+  let whileToken = expect(parser, 'while');
   if (!match_any(parser, parser.initial_expression_tokens)) {
     expect(parser, 'EXPRESSION', "expected EXPRESSION after `while`");
   }
   let test = expr(parser);
   let body = statement_block(parser, "after `while EXPRESSION`");
-  return New_Statement_While(test, body);
+  return New_Statement_While(whileToken, test, body);
 }
 
 function while_statement_sjs(parser) {
-  // The 'while' has already been skipped.
+  let whileToken = expect(parser, 'while');
   expect(parser, 'LPAREN', "expected `(` after `while`");
   let test = expr(parser);
   expect(parser, 'RPAREN', "expected `)` after `while (EXPRESSION`");
   let body = statement_block(parser, "after `while (EXPRESSION)`");
-  return New_Statement_While(test, body);
+  return New_Statement_While(whileToken, test, body);
 }
 
 function while_statement(parser) {
   return parser.is_spectra ? while_statement_sp1(parser) : while_statement_sjs(parser);
 }
 
-export function New_Statement_For(Keyword, Vars, Collection, Body, VarsBracketed) {
-  Keyword === null || assert_is_string_match("New_Statement_For.Keyword", Keyword, varLetOrConst);
-  assert_is_list_of("New_Statement_For.Vars", Vars, string_asserter());
+export function New_Statement_For(For, VarKeyword, Vars, Collection, Body, VarsBracketed) {
+  assert_is_token_equal("New_Statement_For.For", For, 'for');
+  assert_is_maybe_kind("New_Statement_For.VarKeyword", VarKeyword, 'Token');
+  if (isJust(VarKeyword)) {
+    assert_is_string_match("New_Statement_For.VarKeyword.Just.Text", VarKeyword.Just.Text, varLetOrConst);
+  }
+  assert_is_kind_tag("New_Statement_For.Vars", Vars, 'List', 'Identifiers');
   assert_is_kind("New_Statement_For.Collection", Collection, 'Expression');
   assert_is_kind("New_Statement_For.Body", Body, 'Statement', 'Block');
   assert_is_boolean("New_Statement_For.VarsBracketed", VarsBracketed);
-  return { Kind: 'Statement', Tag: 'For', Keyword, Vars, Collection, Body, VarsBracketed };
+  return { Kind: 'Statement', Tag: 'For', For, VarKeyword, Vars, Collection, Body, VarsBracketed };
 }
 
 function for_statement(parser) {
-  // The 'for' has already been skipped.
+  let forToken = expect(parser, 'for');
   if (!parser.is_spectra) {
     expect(parser, 'LPAREN', "expected `(` after `for`");
   }
-  let kw = skip_any(parser, ['let', 'var', 'const']) || null;
+  let varKw = skip_any(parser, ['let', 'var', 'const']);
   let lbrack = skip(parser, 'LBRACK');
   let  vars = identifier_list(parser);
   if (lbrack) { expect(parser, 'RBRACK'); }
@@ -1193,31 +1190,34 @@ function for_statement(parser) {
     expect(parser, 'RPAREN', "expected `)` after `for (...`");
   }
   let body = statement_block(parser, "after `for (...)`");
-  return New_Statement_For(kw.Text, vars, collection, body, !!lbrack);
+  let result =  New_Statement_For(forToken, varKw, vars, collection, body, !!lbrack);
+  return result;
 }
 
-export function New_Statement_Throw(Expression) {
+export function New_Statement_Throw(Throw, Expression) {
+  assert_is_token_equal("New_Statement_Throw.Throw", Throw, 'throw');
   assert_is_kind("New_Statement_Throw.Expression", Expression, 'Expression');
   return { Kind: 'Statement', Tag: 'Throw', Expression };
 }
 
 function throw_statement(parser) {
-  // The 'throw' has already been skipped.
+  let throwToken = expect(parser, 'throw');
   let expression = expr(parser);
   expect(parser, 'SEMICOLON');
-  return New_Statement_Throw(expression);
+  return New_Statement_Throw(throwToken, expression);
 }
 
-export function New_Statement_Return(Expression) {
+export function New_Statement_Return(Return, Expression) {
+  assert_is_token_equal("New_Statement_Return.Return", Return, 'return');
   assert_is_maybe_kind("New_Statement_Return.Expression", Expression, 'Expression');
   return { Kind: 'Statement', Tag: 'Return', Expression };
 }
 
 function return_statement(parser) {
-  // The 'return' has already been skipped.
+  let returnToken = expect(parser, 'return');
   let expression = maybe_expr(parser);
   expect(parser, 'SEMICOLON');
-  return New_Statement_Return(expression);
+  return New_Statement_Return(returnToken, expression);
 }
 
 export function New_Statement_Expression(Expression) {
@@ -1230,13 +1230,13 @@ function maybe_statement(parser, exported) {
   //console.log(`maybe_statement, at ${showCurrentToken(parser)}`);
   if (match(parser, 'if')) {
     statement = if_statement(parser);
-  } else if (skip(parser, 'while')) {
+  } else if (match(parser, 'while')) {
     statement = while_statement(parser);
-  } else if (skip(parser, 'for')) {
+  } else if (match(parser, 'for')) {
     statement = for_statement(parser);
-  } else if (skip(parser, 'throw')) {
+  } else if (match(parser, 'throw')) {
     statement = throw_statement(parser);
-  } else if (skip(parser, 'return')) {
+  } else if (match(parser, 'return')) {
     statement = return_statement(parser);
   } else if (isJust(statement = maybe_expr(parser))) {
     if (exported) {
@@ -1254,7 +1254,7 @@ function maybe_statement(parser, exported) {
 export function New_FunctionSignature(DelimiterLeft, DelimiterRight, FormalParameters) {
   assert_is_token_equal("New_FunctionSignature.DelimiterLeft", DelimiterLeft, '(');
   assert_is_token_equal("New_FunctionSignature.DelimiterRight", DelimiterRight, ')');
-  assert_is_list_of("New_FunctionSignature.FormalParameters", FormalParameters, string_asserter());
+  assert_is_kind_tag("New_FunctionSignature.FormalParameters", FormalParameters, 'List', 'Identifiers');
   return { Kind: 'FunctionSignature', Tag: 'FunctionSignature', DelimiterLeft, DelimiterRight, FormalParameters };
 }
 
@@ -1324,7 +1324,8 @@ function function_declaration(parser, exported, is_async) {
 
 function variable_declaration(parser, exported) {
   let kw = skip_any(parser, ['let', 'var', 'const']);
-  if (!kw) { expect(parser, 'let', "expected `let`, `var`, or `const`"); }
+  if (isNone(kw)) { expect(parser, 'let', "expected `let`, `var`, or `const`"); }
+  kw = kw.Just;
 
   if (skip(parser, 'LBRACK')) {
     let variables = identifier_list(parser);
@@ -1335,7 +1336,7 @@ function variable_declaration(parser, exported) {
     }
     let rhs = expr(parser);
     expect(parser, 'SEMICOLON');
-    return New_Declaration_Variables(kw.Text, variables, rhs, !!exported);
+    return New_Declaration_Variables(kw, variables, rhs, !!exported);
   }
 
   let lhs = expect(parser, 'SYMBOL');
@@ -1344,7 +1345,7 @@ function variable_declaration(parser, exported) {
     rhs = Just(expr(parser));
   }
   expect(parser, 'SEMICOLON');
-  return New_Declaration_Variable(kw.Text, lhs.Text, rhs, !!exported);
+  return New_Declaration_Variable(kw, lhs.Text, rhs, !!exported);
 }
 
 //let assignment_operator = new RegExp('^(=|+=|-=|*=|/=)$');
@@ -1355,46 +1356,47 @@ function is_binary(x, expected_operator) {
          x.Operator === expected_operator;
 }
 
-export function New_Import_List(ImportList, ModulePath) {
-  assert_is_list_of("New_Import_List.ImportList", ImportList, string_asserter());
-  assert_is_string("New_Import_List.ModulePath", ModulePath);
-  return { Kind: 'Import', Tag: 'Import', ModulePath, ImportList };
+export function New_Import_List(Import, Lbrace, Rbrace, From, ImportList, ModulePath) {
+  assert_is_token_equal("New_Import_List.Import", Import, 'import');
+  assert_is_token_type("New_Import_List.Lbrace", Lbrace, 'LBRACE');
+  assert_is_token_type("New_Import_List.Rbrace", Rbrace, 'RBRACE');
+  assert_is_token_type("New_Import_List.From", From, 'from');
+  assert_is_kind_tag("New_Import_List.ImportList", ImportList, 'List', 'Identifiers');
+  assert_is_token_type("New_Import_List.ModulePath", ModulePath, 'STRING');
+  return { Kind: 'Import', Tag: 'Import', Import, ModulePath, ImportList };
 }
 
-export function New_Import_As(Name, ModulePath) {
-  assert_is_string("New_Import_As.Name", Name);
-  assert_is_string("New_Import_As.ModulePath", ModulePath);
-  return { Kind: 'Import', Tag: 'As', Name, ModulePath };
+export function New_Import_As(Import, Star, As, From, Name, ModulePath) {
+  assert_is_token_equal("New_Import_As.Import", Import, 'import');
+  assert_is_token_equal("New_Import_As.Star", Star, '*');
+  assert_is_token_equal("New_Import_As.From", From, 'from');
+  assert_is_token_type("New_Import_As.Name", Name, 'SYMBOL');
+  assert_is_token_type("New_Import_As.ModulePath", ModulePath, 'STRING');
+  return { Kind: 'Import', Tag: 'As', Import, Star, As, From, Name, ModulePath };
 }
 
 function maybe_import(parser) {
   //console.log(`maybe_import at ${showCurrentToken(parser)}`);
-  if (!skip(parser, 'import')) {
+  if (!match(parser, 'import')) {
     return None('Import');
   }
+  let importToken = advance(parser);
 
-  if (skip(parser, 'STAR')) {
-    expect(parser, 'as');
+  if (match(parser, 'STAR')) {
+    let starToken = advance(parser);
+    let asToken = expect(parser, 'as');
     let name = expect(parser, 'SYMBOL');
-    expect(parser, 'from');
+    let fromToken = expect(parser, 'from');
     let path = expect(parser, 'STRING');
     expect(parser, 'SEMICOLON');
-    return Just(New_Import_As(name.Text, path.Text));
+    return Just(New_Import_As(importToken, starToken, asToken, fromToken, name, path));
   }
 
 
-  if (!skip(parser, 'LBRACE')) {
-      throw NewSyntaxError('expected `{` after `import`', curtok(parser));
-  }
+  let lbraceToken = expect(parser, 'LBRACE', 'expected `{` after `import`');
   let identifiers = identifier_list(parser);
-  if (!skip(parser, 'RBRACE')) {
-    throw new SyntaxError('expected `,` or `}`', curtok(parser));
-  }
-
-  if (!skip(parser, 'from')) {
-    throw new SyntaxError('expected `from`', curtok(parser));
-  }
-
+  let rbraceToken = expect(parser, 'RBRACE', 'expected `,` or `}` in import list');
+  let fromToken = expect(parser, 'from', 'expected `from` after `}` in import statement');
   let module_path = skip(parser, 'STRING');
   if (!module_path) {
     throw new SyntaxError('expected STRING after `from` (representing module path)',
@@ -1402,7 +1404,7 @@ function maybe_import(parser) {
   }
 
   expect(parser, 'SEMICOLON');
-  return Just(New_Import_List(identifiers, module_path.Text));
+  return Just(New_Import_List(importToken, lbraceToken, rbraceToken, fromToken, identifiers, module_path));
 }
 
 export function New_Declaration_Function(Name, Signature, Body, Exported, IsAsync) {
@@ -1418,16 +1420,22 @@ export function New_Declaration_Function(Name, Signature, Body, Exported, IsAsyn
 const varLetOrConst = new RegExp('^(var|let|const)$');
 
 export function New_Declaration_Variable(Keyword, Variable, Initializer, Exported) {
-  assert_is_string_match('New_Declaration_Variable.Keyword', Keyword, varLetOrConst);
+  assert_is_token_match('New_Declaration_Variable.Keyword', Keyword, varLetOrConst);
   assert_is_string('New_Declaration_Variable.Variable', Variable);
   assert_is_maybe_kind('New_Declaration_Variable.Initializer', Initializer, 'Expression');
   assert_is_boolean('New_Declaration_Variable.Exported', Exported);
   return { Kind: 'Declaration', Tag: 'Variable', Keyword, Variable, Initializer, Exported };
 }
 
+export function New_List_Identifiers(Identifiers, Commas) {
+  assert_is_list_of('New_List_Identifiers.Identifiers', Identifiers, token_type_asserter('SYMBOL'));
+  assert_is_list_of('New_List_Identifiers.Commas', Commas, token_type_asserter('COMMA'));
+  return { Kind: 'List', Tag: 'Identifiers', Identifiers, Commas };
+}
+
 export function New_Declaration_Variables(Keyword, Variables, Initializer, Exported) {
-  assert_is_string_match('New_Declaration_Variables.Keyword', Keyword, varLetOrConst);
-  assert_is_list_of('New_Declaration_Variables.Variables', Variables, string_asserter());
+  assert_is_token_match('New_Declaration_Variables.Keyword', Keyword, varLetOrConst);
+  assert_is_kind_tag('New_Declaration_Variables.Variables', Variables, 'List', 'Identifiers');
   assert_is_kind('New_Declaration_Variables.Initializer', Initializer, 'Expression');
   assert_is_boolean('New_Declaration_Variables.Exported', Exported);
   return { Kind: 'Declaration', Tag: 'Variables', Keyword, Variables, Initializer, Exported };
@@ -1450,6 +1458,9 @@ function maybe_declaration(parser) {
     if (exported) {
       throw new SyntaxError(`unexpected end-of-input after 'export'`);
     }
+    if (is_async) {
+      throw new SyntaxError(`unexpected end-of-input after 'async'`);
+    }
     return None('DECLARATION');
   } else if (match(parser, parser.function_kw)) {
     return Just(function_declaration(parser, exported, is_async));
@@ -1460,21 +1471,18 @@ function maybe_declaration(parser) {
   }
 }
 
-export function New_ModuleName(name) {
-  assert_is_string("New_ModuleName.name", name);
-  if (typeof(name) !== 'string') {
-    throw new SyntaxError(
-      `internal error: ModuleName name should be a string, got ${name} (type ${typeof(name)})`
-    );
-  }
-  let result = { Kind: 'ModuleName', Tag: 'ModuleName', Name: name };
+export function New_ModuleName(Module, Name) {
+  assert_is_token_type("New_ModuleName.Module", Module, 'module');
+  assert_is_token_type("New_ModuleName.Name", Name, 'SYMBOL');
+  let result = { Kind: 'ModuleName', Tag: 'ModuleName', Module, Name };
   //console.log(`ModuleName is ${JSON.stringify(result)}`);
   return result;
 }
 
 function maybe_module_name(parser) {
   //console.log(`maybe_module_name, at ${showCurrentToken(parser)}`);
-  if (!skip(parser, 'module')) {
+  var Module = skip(parser, 'module');
+  if (!Module) {
     return None('ModuleName');
   }
 
@@ -1485,7 +1493,7 @@ function maybe_module_name(parser) {
     throw new SyntaxError('expected SYMBOL after `module`', curtok(parser));
   }
   expect(parser, 'SEMICOLON');
-  return Just(New_ModuleName(module_name.Text));
+  return Just(New_ModuleName(Module, module_name));
 }
 
 export function New_Unit(Module, ImportList, DeclarationList, ExpectedOutput) {

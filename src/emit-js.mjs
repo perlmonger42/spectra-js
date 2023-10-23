@@ -100,7 +100,7 @@ function nyi(message) {
 function emit_unit(unit) {
   // unit is               { Kind: 'Unit', Tag: 'Unit', Module, ImportList, DeclarationList, ExpectedOutput };
   // Module is             Maybe(ModuleName)
-  // ModuleName is         { Kind: 'ModuleName', Tag: 'ModuleName', Name: string }
+  // ModuleName is         { Kind: 'ModuleName', Tag: 'ModuleName', Module: token, Name: token }
   // ImportList is         [ Import... ]
   // DeclarationList is    [ Declaration... ]
 
@@ -123,18 +123,23 @@ function emit_unit(unit) {
 }
 
 function emit_import(item) {
-  // item is           Import
-  // Import is         { Kind: 'Import', Tag: 'Import', ModulePath: string, ImportList: [string] }
-  //               or  { Kind: 'Import', Tag: 'As', Name, ModulePath: string }
-  // ModulePath is     string
-  // ImportList is     [ string... ]
+  // item       is  { Kind: 'Import', Tag: 'Import', Import, Lbrace, Rbrace, From, ModulePath, ImportList}
+  //            or  { Kind: 'Import', Tag: 'As', Import, Star, As, From, Name, ModulePath }
+  // Import     is  Token
+  // Star       is  Token
+  // As         is  Token
+  // From       is  Token
+  // Name       is  Token/SYMBOL
+  // ModulePath is  Token/STRING
+  // ImportList is  { Kind: 'List', Tag: 'Identifiers', Identifiers: [token...], Commas: [token...] }
   if (item.Tag === 'Import') {
     let start_line = emitter.current_line;
     emit(`import { `);
     indent ('       ');
     let comma = '';
     let newlines = false;
-    for (let name of item.ImportList) {
+    let names = item.ImportList.Identifiers.map((tok) => tok.Text);
+    for (let name of names) {
       let out = comma + name;
       comma = ", ";
 
@@ -142,19 +147,19 @@ function emit_import(item) {
       maybe_nl_emit(too_long, out);
       newlines = newlines || too_long;
     }
-    maybe_nl_emit(newlines,  `} from ${item.ModulePath};`);
+    maybe_nl_emit(newlines,  `} from ${item.ModulePath.Text};`);
     undent();
   } else if (item.Tag === 'As') {
-    emit(`import * as ${item.Name} from ${item.ModulePath};`);
+    emit(`import * as ${item.Name.Text} from ${item.ModulePath.Text};`);
   }
 }
 
 function emit_declaration(decl) {
   // decl is            Declaration
-  // Declaration has    { Tag: 'Function', Name, Signature, Body, Exported, IsAsync }
-  //              or    { Tag: 'Variable', Keyword, Variable, Initializer, Exported };
-  //              or    { Tag: 'Variables', Keyword, Variables, Initializer, Exported };
-  //              or    { Tag: 'Statement', Statement };
+  // Declaration has    { Kind: 'Declaration', Tag: 'Function', Name, Signature, Body, Exported, IsAsync }
+  //              or    { Kind: 'Declaration', Tag: 'Variable', Keyword, Variable, Initializer, Exported };
+  //              or    { Kind: 'Declaration', Tag: 'Variables', Keyword, Variables, Initializer, Exported };
+  //              or    { Kind: 'Declaration', Tag: 'Statement', Statement };
   if (decl.Tag === 'Function') {
     emit_declaration_function(decl);
   } else if (decl.Tag === 'Variable') {
@@ -176,7 +181,8 @@ function emit_declaration_function(decl) {
   //         , Exported: boolean
   //         , IsAsync: boolean
   //         }
-  // FunctionSignature is { Kind: 'FunctionSignature', FormalParameters: [string...] };
+  // FunctionSignature is { Kind: 'FunctionSignature', DelimiterLeft, DelimiterRight, FormalParameters };
+  // FormalParameters is  { Kind: 'List', Tag: 'Identifiers', Identifiers: [token...], Commas: [token...] }
   emit(decl.Exported ? 'export ' : '');
   emit(decl.IsAsync ? 'async ' : '');
   emit(lang.func + ' ');
@@ -186,8 +192,8 @@ function emit_declaration_function(decl) {
 }
 
 function emit_declaration_variable(decl) {
-  // decl is           { Tag: 'Variable', Keyword, Variable, Initializer, Exported }
-  emit(`${decl.Exported ? 'export ' : ''}${decl.Keyword} ${decl.Variable}`);
+  // decl is           { Tag: 'Variable', Keyword: Token, Variable, Initializer, Exported }
+  emit(`${decl.Exported ? 'export ' : ''}${decl.Keyword.Text} ${decl.Variable}`);
   if (isJust(decl.Initializer)) {
     emit(' = ');
     emit_expression(decl.Initializer.Just);
@@ -196,12 +202,12 @@ function emit_declaration_variable(decl) {
 }
 
 function emit_declaration_variables(decl) {
-  // decl        is   { Tag: 'Variables', Keyword: string, Variables, Initializer, Exported };
+  // decl        is   { Tag: 'Variables', Keyword: Token, Variables, Initializer, Exported };
   // Keyword     is   'var', 'let', or 'const'
-  // Variables   is   [string...]
+  // Variables   is   { Kind: 'List', Tag: 'Identifiers', Identifiers: [token...], Commas: [token...] }
   // Initializer is   Expression
   // Exported    is   boolean
-  emit(`${decl.Exported ? 'export ' : ''}${decl.Keyword} `);
+  emit(`${decl.Exported ? 'export ' : ''}${decl.Keyword.Text} `);
   emit_list_of_names('[', decl.Variables, ']');
   emit(' = ');
   emit_expression(decl.Initializer);
@@ -209,11 +215,11 @@ function emit_declaration_variables(decl) {
 }
 
 function emit_statement(stmt) {
-  // stmt is { Kind: 'Statement', Tag: 'If', Test, Body, Else };
-  //      or { Kind: 'Statement', Tag: 'While', Test, Body };
-  //      or { Kind: 'Statement', Tag: 'For', Keyword, Vars, Collection, Body, VarsBracketed };
-  //      or { Kind: 'Statement', Tag: 'Throw', Expression };
-  //      or { Kind: 'Statement', Tag: 'Return', Expression };
+  // stmt is { Kind: 'Statement', Tag: 'If', If, Then, End, Test, Body, Else };
+  //      or { Kind: 'Statement', Tag: 'While', While, Test, Body };
+  //      or { Kind: 'Statement', Tag: 'For', For: Token, VarKeyword, Vars, Collection, Body, VarsBracketed };
+  //      or { Kind: 'Statement', Tag: 'Throw', Throw: Token, Expression };
+  //      or { Kind: 'Statement', Tag: 'Return', Return: Token, Expression };
   //      or { Kind: 'Statement', Tag: 'Expression', Expression };
   //      or { Kind: 'Statement', Tag: 'List', Statements };
   //      or { Kind: 'Statement', Tag: 'Block', Statements, Opener: Token, Closer: Token };
@@ -254,7 +260,10 @@ function emit_statement_list(stmt_list) {
 }
 
 function js_emit_statement_if(stmt) {
-  // stmt is { Kind: 'Statement', Tag: 'If', Test: Expression, Body, Else: Maybe(Statement) };
+  // stmt is { Kind: 'Statement', Tag: 'If', If, Then, End, Test: Expression, Body, Else: Maybe(Statement) };
+  // If   is a Token
+  // Then is a Just(Token) if Spectra, None(Token) if SJS
+  // End  is a Just(Token) if Spectra, None(Token) if SJS
   // Body is { Kind: 'Statement', Tag: 'List', Statements }
   //      or { Kind: 'Statement', Tag: 'Block', Statements, Opener, Closer }
   // Else is { Kind: 'Statement', Tab: 'List', Statements }
@@ -295,7 +304,7 @@ function sp1_emit_statement_if(stmt) {
 }
 
 function emit_statement_while(stmt) {
-  // stmt is { Kind: 'Statement', Tag: 'While', Test, Body };
+  // stmt is { Kind: 'Statement', Tag: 'While', While: Token, Test, Body };
   emit(`while ${lang.test_lpar}`);
   emit_expression(stmt.Test);
   emit(`${lang.test_rpar} `);
@@ -303,14 +312,15 @@ function emit_statement_while(stmt) {
 }
 
 function emit_statement_for(stmt) {
-  // stmt       is { Kind: 'Statement', Tag: 'For', Keyword: string, Vars, Collection, Body, VarsBracketed };
-  // Keyword    is null or 'var' or 'let' or 'const'
-  // Vars       is [string...]
+  // stmt       is { Kind: 'Statement', Tag: 'For', For, VarKeyword, Vars, Collection, Body, VarsBracketed };
+  // For        is Token
+  // VarKeyword is Maybe(Token); if isJust(VarKeyword), VarKeyword.Text is one of {'var', 'let', 'const'}
+  // Vars       is { Kind: 'List', Tag: 'Identifiers', Identifiers: [token...], Commas: [token...] }
   // Collection is Expression
   // Body       is Statement/List
   emit(`for ${lang.test_lpar}`);
-  if (stmt.Keyword !== null) {
-    emit(stmt.Keyword + ' ');
+  if (isJust(stmt.VarKeyword)) {
+    emit(stmt.VarKeyword.Just.Text + ' ');
   }
   let [l, r] = stmt.VarsBracketed ? ['[', ']'] : ['', ''];
   emit_list_of_names(l, stmt.Vars, r);
@@ -321,7 +331,7 @@ function emit_statement_for(stmt) {
 }
 
 function emit_statement_throw(stmt) {
-  // stmt      is { Kind: 'Statement', Tag: 'Throw', Expression };
+  // stmt      is { Kind: 'Statement', Tag: 'Throw', Throw: Token, Expression };
   // Exception is Expression
   emit('throw ');
   emit_expression(stmt.Expression);
@@ -329,7 +339,7 @@ function emit_statement_throw(stmt) {
 }
 
 function emit_statement_return(stmt) {
-  // stmt is { Kind: 'Statement', Tag: 'Return', Expression: Maybe(Expression) };
+  // stmt is { Kind: 'Statement', Tag: 'Return', Return: Token, Expression: Maybe(Expression) };
   emit('return');
   if (isJust(stmt.Expression)) {
     emit(' ');
@@ -567,12 +577,13 @@ function emit_list_of_expressions(prefix, exprs, postfix) {
   emit(postfix);
 }
 
-function emit_list_of_names(prefix, names, postfix) {
+function emit_list_of_names(prefix, list_identifiers, postfix) {
+  // list_identifiers is { Kind: 'List', Tag: 'Identifiers', Identifiers: [token...], Commas: [token...] }
   emit(prefix);
   let comma = '';
-  for (let x of names) {
+  for (let x of list_identifiers.Identifiers) {
     emit(comma);
-    emit(x);
+    emit(x.Text);
     comma = ', ';
   }
   emit(postfix);
@@ -585,7 +596,7 @@ function emit_literal_function(func) {
   // Body              is Statement/List
   // FunctionSignature is { Kind: 'FunctionSignature', Tag: 'FunctionSignature', DelimiterLeft, DelimiterRight,
   //                        FormalParameters };
-  // FormalParameters  is [string...]
+  // FormalParameters is  { Kind: 'List', Tag: 'Identifiers', Identifiers: [token...], Commas: [token...] }
   emit(lang.func + ' ');
   if (func.Name.Text !== '') {
     emit(func.Name.Text);
