@@ -42,13 +42,13 @@ function emit(text) {
   // console.log(`line: ${emitter.current_line}, column: ${emitter.current_column}`);
 }
 
-function blank_line() {
+function nl_no_indent() {
   emitter.writer('\n');
   emitter.current_line++;
   emitter.current_column = 1;
 }
 
-function nl() {
+function nl_and_indent() {
   emit('\n' + emitter.current_indent);
 }
 
@@ -98,24 +98,27 @@ function nyi(message) {
 }
 
 function emit_unit(unit) {
-  // unit is               { Kind: 'Unit', Tag: 'Unit', Module, ImportList, DeclarationList, ExpectedOutput };
+  // unit is               { Kind: 'Unit', Tag: 'Unit', ModuleComments, Module, ImportList, DeclarationList, ExpectedOutput };
+  // ModuleComments is     { Kind: 'Declaration', Tag: 'Comments', Comments: [token...] }
   // Module is             Maybe(ModuleName)
   // ModuleName is         { Kind: 'ModuleName', Tag: 'ModuleName', Module: token, Name: token }
   // ImportList is         [ Import... ]
   // DeclarationList is    [ Declaration... ]
 
+  emit_declaration_comments(unit.ModuleComments);
+
   let name = isJust(unit.Module) ? unit.Module.Just.Name : 'main';
   emit(`// module ${name};`);
 
   for (let item of unit.ImportList) {
-    nl();
+    nl_and_indent();
     emit_import(item);
   }
-  nl();
+  nl_and_indent();
 
   for (let decl of unit.DeclarationList) {
-    blank_line();
-    nl();
+    nl_no_indent();
+    nl_and_indent();
     emit_declaration(decl);
   }
   emit('\n');
@@ -156,11 +159,14 @@ function emit_import(item) {
 
 function emit_declaration(decl) {
   // decl is            Declaration
-  // Declaration has    { Kind: 'Declaration', Tag: 'Function', Name, Signature, Body, Exported, IsAsync }
+  // Declaration has    { Kind: 'Declaration', Tag: 'Comments', Comments: [token...] }
+  //              or    { Kind: 'Declaration', Tag: 'Function', Name, Signature, Body, Exported, IsAsync }
   //              or    { Kind: 'Declaration', Tag: 'Variable', Keyword, Variable, Initializer, Exported };
   //              or    { Kind: 'Declaration', Tag: 'Variables', Keyword, Variables, Initializer, Exported };
   //              or    { Kind: 'Declaration', Tag: 'Statement', Statement };
-  if (decl.Tag === 'Function') {
+  if (decl.Tag === 'Comments') {
+    emit_declaration_comments(decl);
+  } else if (decl.Tag === 'Function') {
     emit_declaration_function(decl);
   } else if (decl.Tag === 'Variable') {
     emit_declaration_variable(decl);
@@ -170,6 +176,16 @@ function emit_declaration(decl) {
     emit_statement(decl.Statement);
   } else {
     die(`unknown Declaration.Tag: ${decl.Tag} in ${describe(decl, 2000)}`);
+  }
+}
+
+function emit_declaration_comments(decl) {
+  // decl is { Tag: 'Comments', Comments: [token...] }
+  for (var c of decl.Comments) {
+    emit(c.Text);
+    if (c.Type === 'EOL_COMMENT') {
+      nl_and_indent();
+    }
   }
 }
 
@@ -253,7 +269,7 @@ function emit_statement_block(body) {
 function emit_statement_list(stmt_list) {
   indent('  ');
   for (let decl of stmt_list) {
-    nl();
+    nl_and_indent();
     emit_declaration(decl);
   }
   undent();
@@ -656,7 +672,7 @@ function precedence(expr) {
     return 2;
   } else if (expr.Tag === 'Symbol' || expr.Tag === 'Literal' || expr.Tag === 'Grouping') {
     return 18;
-  } else if (expr.Tag === 'Object' || expr.Tag === 'Array' /*|| expr.Tag === 'List'*/) {
+  } else if (expr.Tag === 'Object' || expr.Tag === 'Array') {
     return 18;
   } else if (expr.Tag === 'Pair') {
     return 2;  // this is really the comma operator inside object constructors

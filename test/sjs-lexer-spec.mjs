@@ -18,6 +18,10 @@ function tok(t) {
   return { Kind: 'Token', Type: t[0], Text: t[1], Loc: loc };
 }
 
+function next(lexer) {
+  return NextItem(lexer, true, true);
+}
+
 describe("SimpleJS Lexer", function () {
 
   it("should return EOF immediately on an empty string", function () {
@@ -46,24 +50,24 @@ describe("SimpleJS Lexer", function () {
 
   it("should handle whitespace and newlines properly", function () {
     var lexer = SjsLexer(" \t\v \n \n\r\n   \n");
-    expect(NextItem(lexer, true)).to.deep.equal(tok(['WHITESPACE', ' \t\v ', 1, 1, 0]));
-    expect(NextItem(lexer, true)).to.deep.equal(tok(['NEWLINE', '\n', 1, 5, 4]));
-    expect(NextItem(lexer, true)).to.deep.equal(tok(['WHITESPACE', ' ', 2, 1, 5]));
-    expect(NextItem(lexer, true)).to.deep.equal(tok(['NEWLINE', '\n', 2, 2, 6]));
-    expect(NextItem(lexer, true)).to.deep.equal(tok(['NEWLINE', '\r\n', 3, 1, 7]));
-    expect(NextItem(lexer, true)).to.deep.equal(tok(['WHITESPACE', '   ', 4, 1, 9]));
-    expect(NextItem(lexer, true)).to.deep.equal(tok(['NEWLINE', '\n', 4, 4, 12]));
-    expect(NextItem(lexer, true)).to.deep.equal(tok(['EOF', '', 5, 1, 13]));
+    expect(next(lexer)).to.deep.equal(tok(['WHITESPACE', ' \t\v ', 1, 1, 0]));
+    expect(next(lexer)).to.deep.equal(tok(['NEWLINE', '\n', 1, 5, 4]));
+    expect(next(lexer)).to.deep.equal(tok(['WHITESPACE', ' ', 2, 1, 5]));
+    expect(next(lexer)).to.deep.equal(tok(['NEWLINE', '\n', 2, 2, 6]));
+    expect(next(lexer)).to.deep.equal(tok(['NEWLINE', '\r\n', 3, 1, 7]));
+    expect(next(lexer)).to.deep.equal(tok(['WHITESPACE', '   ', 4, 1, 9]));
+    expect(next(lexer)).to.deep.equal(tok(['NEWLINE', '\n', 4, 4, 12]));
+    expect(next(lexer)).to.deep.equal(tok(['EOF', '', 5, 1, 13]));
   });
 
   describe("should compute correct positions with newlines in tokens", function () {
     it("which happens with block comments", function () {
       var lexer = SjsLexer("1 /*\n*/ 2");
-      expect(NextItem(lexer, true)).to.deep.equal(tok(['FIXNUM', '1', 1, 1, 0]));
-      expect(NextItem(lexer, true)).to.deep.equal(tok(['WHITESPACE', ' ', 1, 2, 1]));
-      expect(NextItem(lexer, true)).to.deep.equal(tok(['BLOCK_COMMENT', '/*\n*/', 1, 3, 2]));
-      expect(NextItem(lexer, true)).to.deep.equal(tok(['WHITESPACE', ' ', 2, 3, 7]));
-      expect(NextItem(lexer, true)).to.deep.equal(tok(['FIXNUM', '2', 2, 4, 8]));
+      expect(next(lexer)).to.deep.equal(tok(['FIXNUM', '1', 1, 1, 0]));
+      expect(next(lexer)).to.deep.equal(tok(['WHITESPACE', ' ', 1, 2, 1]));
+      expect(next(lexer)).to.deep.equal(tok(['BLOCK_COMMENT', '/*\n*/', 1, 3, 2]));
+      expect(next(lexer)).to.deep.equal(tok(['WHITESPACE', ' ', 2, 3, 7]));
+      expect(next(lexer)).to.deep.equal(tok(['FIXNUM', '2', 2, 4, 8]));
     });
     it("which happens with back-quoted strings", function () {
       var lexer = SjsLexer("3`a\nb\nc`4");

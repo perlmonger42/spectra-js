@@ -76,9 +76,7 @@ export function NewLexer(filename, language, text) {
 }
 
 //function ShowLexer(lexer) {
-//  let text = `{text: "${lexer.text}", offset: ${lexer.offset}, line: ${lexer.line}, column: ${lexer.column}}`;
-//  console.log(text);
-//  return text;
+//  return `{text: "${lexer.text}", offset: ${lexer.offset}, line: ${lexer.line}, column: ${lexer.column}}`;
 //}
 
 
@@ -131,7 +129,7 @@ function next_item_including_whitespace_tokens(lexer) {
   return { Kind: 'Token', Type: 'EOF', Text: '', Loc: loc };
 }
 
-/* NextItem(showWhitespace) returns the next matched token
+/* NextItem(lexer, showWhitespace, showComments) returns the next matched token
  * as an object `{ Kind: 'Token', Type: TYPE, Text: TEXT,
  *                 Loc: { Kind: 'Loc', File: FILENAME,
  *                        Line: LINE, Column: COLUMN, Offset: CHARACTER_OFFSET
@@ -150,20 +148,23 @@ function next_item_including_whitespace_tokens(lexer) {
  *   }
  *
  * Whitespace items are skipped unless `showWhitespace` is truthy.
- * Newlines are NOT skipped, even when `showWhitespace` is falsy.
+ * Comment items are skipped unless `showComments` is truthy.
  *
  * TYPE is one of the `lexer.tokenMatchers[].Type` values (NEWLINE thru UNKNOWN),
  * except in the case of `lexer.tokenMatchers[].Type === 'KEYWORD'`. For keywords,
  * the TYPE is a copy of TEXT. For example, TYPE and TEXT will usually be
  * something like "FIXNUM" and "42". But for keywords, "if" and "if" (e.g.).
  */
-export function NextItem(lexer, showWhitespace) {
-  //console.log(`NextItem(lexer: ${lexer}, showWhitespace: ${showWhitespace}`);
-  //console.log(`NextItem(lexer: ${ShowLexer(lexer)}, showWhitespace: ${showWhitespace}`);
+export function NextItem(lexer, showWhitespace, showComments) {
+  //console.log(`NextItem(lexer: ${ShowLexer(lexer)}, showWhitespace: ${showWhitespace}, showComments: ${showComments}`);
   while (1) {
     let token = next_item_including_whitespace_tokens(lexer);
     let t = token.Type;
-    if (showWhitespace || t !== 'WHITESPACE' && t !== 'NEWLINE' && t !== "EOL_COMMENT" && t !== "BLOCK_COMMENT") {
+    if (!showWhitespace && (t === 'WHITESPACE' || t === 'NEWLINE')) {
+      // skip this token
+    } else if (!showComments && (t === 'EOL_COMMENT' || t === 'BLOCK_COMMENT')) {
+      // skip this token
+    } else {
       return token;
     }
   }

@@ -19,7 +19,7 @@ export function NewParser(language, lexer) {
     is_spectra,
     language,
     lexer,
-    current_token: NextItem(lexer, false),
+    current_token: NextItem(lexer, false, true),
 
     function_kw,
     initial_expression_tokens: [
@@ -444,7 +444,7 @@ function advance(parser) {
     throw new SyntaxError("cannot advance past end-of-input");
   }
   let token = parser.current_token;
-  parser.current_token = NextItem(parser.lexer, false);
+  parser.current_token = NextItem(parser.lexer, false, true);
   return token;
 }
 
@@ -1447,8 +1447,25 @@ export function New_Declaration_Statement(Statement) {
   return { Kind: 'Declaration', Tag: 'Statement', Statement };
 }
 
+export function New_Declaration_Comments(Comments) {
+  return { Kind: 'Declaration', Tag: 'Comments', Comments };
+}
+
+function maybe_comments(parser) {
+  let comments = [ ];
+  while (match_any(parser, ['EOL_COMMENT', 'BLOCK_COMMENT'])) {
+    comments.push(advance(parser));
+  }
+  return comments;
+}
+
 function maybe_declaration(parser) {
   //console.log(`maybe_declaration, at ${showCurrentToken(parser)}`);
+  let comments = maybe_comments(parser);
+  if (comments.length > 0) {
+    return Just(New_Declaration_Comments(comments));
+  }
+
   let exported = skip(parser, 'export');
   let is_async = skip(parser, 'async');
   if (!!is_async && peek(parser) !== parser.function_kw) {
@@ -1496,16 +1513,19 @@ function maybe_module_name(parser) {
   return Just(New_ModuleName(Module, module_name));
 }
 
-export function New_Unit(Module, ImportList, DeclarationList, ExpectedOutput) {
+export function New_Unit(ModuleComments, Module, ImportList, DeclarationList, ExpectedOutput) {
+  assert_is_kind_tag('New_Unit.ModuleComments', ModuleComments, 'Declaration', 'Comments');
   assert_is_maybe_kind("New_Unit.Module", Module, 'ModuleName');
   assert_is_list_of("New_Unit.ImportList", ImportList, kind_asserter('Import'));
   assert_is_list_of("New_Unit.DeclarationList", DeclarationList, kind_asserter('Declaration'));
   assert_is_string("New_Unit.ExpectedOutput", ExpectedOutput);
-  return { Kind: 'Unit', Tag: 'Unit', Module, ImportList, DeclarationList, ExpectedOutput };
+  return { Kind: 'Unit', Tag: 'Unit', ModuleComments, Module, ImportList, DeclarationList, ExpectedOutput };
 }
 
 function unit(parser) {
   //console.log(`unit, at ${showCurrentToken(parser)}`);
+
+  let ModuleComments = New_Declaration_Comments(maybe_comments(parser));
   let Module = maybe_module_name(parser);
   //console.log(`after module declaration, at ${showCurrentToken(parser)}`);
 
@@ -1525,7 +1545,7 @@ function unit(parser) {
   }
 
   expect(parser, 'EOF', "expected DECLARATION or EOF");
-  return New_Unit(Module, ImportList, StatementList, output);
+  return New_Unit(ModuleComments, Module, ImportList, StatementList, output);
 }
 
 // Return value is an AST; see "./syntax-tree-format.md" for details.

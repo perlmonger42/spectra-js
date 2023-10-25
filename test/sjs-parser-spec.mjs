@@ -4,7 +4,7 @@ import { InternalError, NewParser, Parse
        , Just, None
        , New_Unit, New_ModuleName
        , New_Declaration_Function, New_Declaration_Variable, New_Declaration_Variables
-       , New_Declaration_Statement
+       , New_Declaration_Comments, New_Declaration_Statement
        , New_FunctionSignature, New_Statement_List, New_Statement_Block
        , New_Statement_If, New_Statement_Return, New_Statement_While, New_Statement_For, New_Statement_Throw
        , New_Statement_Expression
@@ -125,7 +125,7 @@ function singleDefinitionProgram(definition) {
   let name = None('ModuleName');
   let imports = [ ];
   let decls = [definition] ;
-  return strip_locations(New_Unit(name, imports, decls, ''));
+  return strip_locations(New_Unit(New_Declaration_Comments([]), name, imports, decls, ''));
 }
 
 // Build a Unit for a program that contains only an expression
@@ -175,6 +175,16 @@ describe("SimpleJS Parser", function () {
   it("should throw SyntaxError on `)`", function () {
     let parser = SjsParser(SjsLexer(")"));
     expect(() => Parse(parser).Just).to.throw(SyntaxError, new RegExp('expected DECLARATION'));
+  });
+
+  it("should handle module comments", function () {
+    let parser = SjsParser(SjsLexer("/* hello, world! */"));
+    let comments = [ tok('BLOCK_COMMENT', "/* hello, world! */") ];
+    let name = None('ModuleName');
+    let imports = [ ];
+    let decls = [] ;
+    let unit = strip_locations(New_Unit(New_Declaration_Comments(comments), name, imports, decls, ''));
+    expect(parse(parser)).to.deep.equal(unit);
   });
 
   it("should not allow `export` before ExpressionStatement", function () {
@@ -518,7 +528,7 @@ describe("SimpleJS Parser", function () {
     it("should recognize an empty module xyz", function() {
       let parser = SjsParser(SjsLexer("module xyz;"));
       let name = strip_locations(Just(New_ModuleName(tok('module', 'module'), tok('SYMBOL', 'xyz'))));
-      expect(parse(parser)).to.deep.equal(New_Unit(name, [], [], ''));
+      expect(parse(parser)).to.deep.equal(New_Unit(New_Declaration_Comments([]), name, [], [], ''));
     });
 
     it("should build an AST for a module", function () {
@@ -529,6 +539,11 @@ describe("SimpleJS Parser", function () {
 `{
   "Kind": "Unit",
   "Tag": "Unit",
+  "ModuleComments": {
+    "Kind": "Declaration",
+    "Tag": "Comments",
+    "Comments": []
+  },
   "Module": {
     "Kind": "Maybe",
     "Tag": "Just",
