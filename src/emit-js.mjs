@@ -1,6 +1,4 @@
-import { describe, isJust, isNone, InternalError
-       , is_kind, is_kind_tag
-       } from '../src/sjs-parser.mjs';
+import { describe, isJust, isNone, InternalError, is_kind, is_kind_tag } from '../src/sjs-parser.mjs';
 
 let emitter; // { writer, current_indent, indent_stack, current_line, current_column }
 let lang; // { fn, do,end }
