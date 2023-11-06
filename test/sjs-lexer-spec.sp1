@@ -1,0 +1,670 @@
+// module main;
+import { expect} from "chai";
+import { NextItem, NewLexer} from "../src/sjs-lexer.mjs";
+
+
+fn match(token, kind, text) do
+  expect({
+    Type: token.Type,
+    Text: token.Text
+  }).to.deep.equal({
+    Type: kind,
+    Text: text
+  });
+end
+
+fn SjsLexer(text) do
+  return NewLexer('', 'sjs', text);
+end
+
+fn Sp1Lexer(text) do
+  return NewLexer('', 'sp1', text);
+end
+
+fn tok(t) do
+  let loc = {
+    Kind: 'Loc',
+    File: '',
+    Line: t[2],
+    Column: t[3],
+    Offset: t[4]
+  };
+  return {
+    Kind: 'Token',
+    Type: t[0],
+    Text: t[1],
+    Loc: loc
+  };
+end
+
+fn next(lexer) do
+  return NextItem(lexer, true, true);
+end
+
+describe("SimpleJS Lexer", fn ()do
+  it("should return EOF immediately on an empty string", fn ()do
+    var lexer = SjsLexer("");
+    expect(NextItem(lexer, true)).to.deep.equal(tok([
+      'EOF',
+      '',
+      1,
+      1,
+      0
+    ]));
+  end);
+  describe("should scan regular expressions", fn ()do
+    it("simple", fn ()do
+      var lexer = SjsLexer("/blah/");
+      expect(NextItem(lexer, true)).to.deep.equal(tok([
+        'REGEXP',
+        '/blah/',
+        1,
+        1,
+        0
+      ]));
+    end);
+    it("with flags", fn ()do
+      var lexer = SjsLexer("/x/gi");
+      expect(NextItem(lexer, true)).to.deep.equal(tok([
+        'REGEXP',
+        '/x/gi',
+        1,
+        1,
+        0
+      ]));
+    end);
+    it("with escaped slash", fn ()do
+      var lexer = SjsLexer("/\\//ms");
+      expect(NextItem(lexer, true)).to.deep.equal(tok([
+        'REGEXP',
+        '/\\//ms',
+        1,
+        1,
+        0
+      ]));
+    end);
+    it("with class", fn ()do
+      var lexer = SjsLexer("/[a-z/]*/g");
+      expect(NextItem(lexer, true)).to.deep.equal(tok([
+        'REGEXP',
+        '/[a-z/]*/g',
+        1,
+        1,
+        0
+      ]));
+    end);
+  end);
+  it("should handle whitespace and newlines properly", fn ()do
+    var lexer = SjsLexer(" \t\v \n \n\r\n   \n");
+    expect(next(lexer)).to.deep.equal(tok([
+      'WHITESPACE',
+      ' \t\v ',
+      1,
+      1,
+      0
+    ]));
+    expect(next(lexer)).to.deep.equal(tok([
+      'NEWLINE',
+      '\n',
+      1,
+      5,
+      4
+    ]));
+    expect(next(lexer)).to.deep.equal(tok([
+      'WHITESPACE',
+      ' ',
+      2,
+      1,
+      5
+    ]));
+    expect(next(lexer)).to.deep.equal(tok([
+      'NEWLINE',
+      '\n',
+      2,
+      2,
+      6
+    ]));
+    expect(next(lexer)).to.deep.equal(tok([
+      'NEWLINE',
+      '\r\n',
+      3,
+      1,
+      7
+    ]));
+    expect(next(lexer)).to.deep.equal(tok([
+      'WHITESPACE',
+      '   ',
+      4,
+      1,
+      9
+    ]));
+    expect(next(lexer)).to.deep.equal(tok([
+      'NEWLINE',
+      '\n',
+      4,
+      4,
+      12
+    ]));
+    expect(next(lexer)).to.deep.equal(tok([
+      'EOF',
+      '',
+      5,
+      1,
+      13
+    ]));
+  end);
+  describe("should compute correct positions with newlines in tokens", fn ()do
+    it("which happens with block comments", fn ()do
+      var lexer = SjsLexer("1 /*\n*/ 2");
+      expect(next(lexer)).to.deep.equal(tok([
+        'FIXNUM',
+        '1',
+        1,
+        1,
+        0
+      ]));
+      expect(next(lexer)).to.deep.equal(tok([
+        'WHITESPACE',
+        ' ',
+        1,
+        2,
+        1
+      ]));
+      expect(next(lexer)).to.deep.equal(tok([
+        'BLOCK_COMMENT',
+        '/*\n*/',
+        1,
+        3,
+        2
+      ]));
+      expect(next(lexer)).to.deep.equal(tok([
+        'WHITESPACE',
+        ' ',
+        2,
+        3,
+        7
+      ]));
+      expect(next(lexer)).to.deep.equal(tok([
+        'FIXNUM',
+        '2',
+        2,
+        4,
+        8
+      ]));
+    end);
+    it("which happens with back-quoted strings", fn ()do
+      var lexer = SjsLexer("3`a\nb\nc`4");
+      expect(NextItem(lexer, true)).to.deep.equal(tok([
+        'FIXNUM',
+        '3',
+        1,
+        1,
+        0
+      ]));
+      expect(NextItem(lexer, true)).to.deep.equal(tok([
+        'STRING',
+        '`a\nb\nc`',
+        1,
+        2,
+        1
+      ]));
+      expect(NextItem(lexer, true)).to.deep.equal(tok([
+        'FIXNUM',
+        '4',
+        3,
+        3,
+        8
+      ]));
+    end);
+  end);
+  describe("should recognize identifiers", fn ()do
+    var token;
+    var lexer = SjsLexer("a bc");
+    beforeEach(fn ()do
+      token = NextItem(lexer, true);
+    end);
+    it("should be symbol 'a'", fn ()do
+      expect(token).to.deep.equal(tok([
+        'SYMBOL',
+        'a',
+        1,
+        1,
+        0
+      ]));
+    end);
+    it("should be whitespace", fn ()do
+      expect(token).to.deep.equal(tok([
+        'WHITESPACE',
+        ' ',
+        1,
+        2,
+        1
+      ]));
+    end);
+    it("should be symbol 'bc'", fn ()do
+      expect(token).to.deep.equal(tok([
+        'SYMBOL',
+        'bc',
+        1,
+        3,
+        2
+      ]));
+    end);
+  end);
+  describe("should recognize skip-whitespace parameter", fn ()do
+    var token;
+    var lexer = SjsLexer("a bc");
+    beforeEach(fn ()do
+      token = NextItem(lexer, false);
+    end);
+    it("should be symbol 'a'", fn ()do
+      match(token, 'SYMBOL', 'a');
+    end);
+    it("should be symbol 'bc'", fn ()do
+      match(token, 'SYMBOL', 'bc');
+    end);
+  end);
+  describe("should recognize punctuation", fn ()do
+    var token;
+    var lexer = SjsLexer("(){}[];=====!==!= <= < >= > =");
+    beforeEach(fn ()do
+      token = NextItem(lexer, false);
+    end);
+    it("should be a open parenthesis", fn ()do
+      expect(token).to.deep.equal(tok([
+        'LPAREN',
+        '(',
+        1,
+        1,
+        0
+      ]));
+    end);
+    it("should be a close parenthesis", fn ()do
+      expect(token).to.deep.equal(tok([
+        'RPAREN',
+        ')',
+        1,
+        2,
+        1
+      ]));
+    end);
+    it("should be a open curly brace", fn ()do
+      expect(token).to.deep.equal(tok([
+        'LBRACE',
+        '{',
+        1,
+        3,
+        2
+      ]));
+    end);
+    it("should be a close curly brace", fn ()do
+      expect(token).to.deep.equal(tok([
+        'RBRACE',
+        '}',
+        1,
+        4,
+        3
+      ]));
+    end);
+    it("should be a open square bracket", fn ()do
+      expect(token).to.deep.equal(tok([
+        'LBRACK',
+        '[',
+        1,
+        5,
+        4
+      ]));
+    end);
+    it("should be a close square bracket", fn ()do
+      expect(token).to.deep.equal(tok([
+        'RBRACK',
+        ']',
+        1,
+        6,
+        5
+      ]));
+    end);
+    it("should be a semicolon", fn ()do
+      expect(token).to.deep.equal(tok([
+        'SEMICOLON',
+        ';',
+        1,
+        7,
+        6
+      ]));
+    end);
+    it("should be an identical operator", fn ()do
+      expect(token).to.deep.equal(tok([
+        'IDENTICAL',
+        '===',
+        1,
+        8,
+        7
+      ]));
+    end);
+    it("should be an equals operator", fn ()do
+      expect(token).to.deep.equal(tok([
+        'EQ',
+        '==',
+        1,
+        11,
+        10
+      ]));
+    end);
+    it("should be a not-identical operator", fn ()do
+      expect(token).to.deep.equal(tok([
+        'NOTIDENTICAL',
+        '!==',
+        1,
+        13,
+        12
+      ]));
+    end);
+    it("should be a not-equals operator", fn ()do
+      expect(token).to.deep.equal(tok([
+        'NEQ',
+        '!=',
+        1,
+        16,
+        15
+      ]));
+    end);
+    it("should be a less-than-or-equals operator", fn ()do
+      expect(token).to.deep.equal(tok([
+        'LEQ',
+        '<=',
+        1,
+        19,
+        18
+      ]));
+    end);
+    it("should be a less-than operator", fn ()do
+      expect(token).to.deep.equal(tok([
+        'LT',
+        '<',
+        1,
+        22,
+        21
+      ]));
+    end);
+    it("should be a greater-than-or-equals operator", fn ()do
+      expect(token).to.deep.equal(tok([
+        'GEQ',
+        '>=',
+        1,
+        24,
+        23
+      ]));
+    end);
+    it("should be a greater-than operator", fn ()do
+      expect(token).to.deep.equal(tok([
+        'GT',
+        '>',
+        1,
+        27,
+        26
+      ]));
+    end);
+    it("should be an assignment operator", fn ()do
+      expect(token).to.deep.equal(tok([
+        'ASSIGN',
+        '=',
+        1,
+        29,
+        28
+      ]));
+    end);
+  end);
+  describe("should recognize Spectra keywords", fn ()do
+    var text = "do blah end fn elsif";
+    var token;
+    var lexer = Sp1Lexer(text);
+    beforeEach(fn ()do
+      token = NextItem(lexer, false);
+    end);
+    it("should be `do`", fn ()do
+      expect(token).to.deep.equal(tok([
+        'do',
+        'do',
+        1,
+        1,
+        0
+      ]));
+    end);
+    it("should be `blah`", fn ()do
+      expect(token).to.deep.equal(tok([
+        'SYMBOL',
+        'blah',
+        1,
+        4,
+        3
+      ]));
+    end);
+    it("should be `end`", fn ()do
+      expect(token).to.deep.equal(tok([
+        'end',
+        'end',
+        1,
+        9,
+        8
+      ]));
+    end);
+    it("should be `fn`", fn ()do
+      expect(token).to.deep.equal(tok([
+        'fn',
+        'fn',
+        1,
+        13,
+        12
+      ]));
+    end);
+    it("should be `elsif`", fn ()do
+      expect(token).to.deep.equal(tok([
+        'elsif',
+        'elsif',
+        1,
+        16,
+        15
+      ]));
+    end);
+  end);
+  describe("should recognize SimpleJavaScript keywords", fn ()do
+    var text = "do else end if function import module then let export fn elsif";
+    var token;
+    var lexer = SjsLexer(text);
+    beforeEach(fn ()do
+      token = NextItem(lexer, false);
+    end);
+    it("should be SYMBOL `do`", fn ()do
+      expect(token).to.deep.equal(tok([
+        'SYMBOL',
+        'do',
+        1,
+        1,
+        0
+      ]));
+    end);
+    it("should be `else`", fn ()do
+      expect(token).to.deep.equal(tok([
+        'else',
+        'else',
+        1,
+        4,
+        3
+      ]));
+    end);
+    it("should be SYMBOL `end`", fn ()do
+      expect(token).to.deep.equal(tok([
+        'SYMBOL',
+        'end',
+        1,
+        9,
+        8
+      ]));
+    end);
+    it("should be `if`", fn ()do
+      expect(token).to.deep.equal(tok([
+        'if',
+        'if',
+        1,
+        13,
+        12
+      ]));
+    end);
+    it("should be `function`", fn ()do
+      expect(token).to.deep.equal(tok([
+        'function',
+        'function',
+        1,
+        16,
+        15
+      ]));
+    end);
+    it("should be `import`", fn ()do
+      expect(token).to.deep.equal(tok([
+        'import',
+        'import',
+        1,
+        25,
+        24
+      ]));
+    end);
+    it("should be `module`", fn ()do
+      expect(token).to.deep.equal(tok([
+        'module',
+        'module',
+        1,
+        32,
+        31
+      ]));
+    end);
+    it("should be `then`", fn ()do
+      expect(token).to.deep.equal(tok([
+        'then',
+        'then',
+        1,
+        39,
+        38
+      ]));
+    end);
+    it("should be `let`", fn ()do
+      expect(token).to.deep.equal(tok([
+        'let',
+        'let',
+        1,
+        44,
+        43
+      ]));
+    end);
+    it("should be `export`", fn ()do
+      expect(token).to.deep.equal(tok([
+        'export',
+        'export',
+        1,
+        48,
+        47
+      ]));
+    end);
+    it("should be SYMBOL `fn`", fn ()do
+      expect(token).to.deep.equal(tok([
+        'SYMBOL',
+        'fn',
+        1,
+        55,
+        54
+      ]));
+    end);
+    it("should be SYMBOL `elsif`", fn ()do
+      expect(token).to.deep.equal(tok([
+        'SYMBOL',
+        'elsif',
+        1,
+        58,
+        57
+      ]));
+    end);
+    it("should be EOF", fn ()do
+      expect(token).to.deep.equal(tok([
+        'EOF',
+        '',
+        1,
+        63,
+        62
+      ]));
+    end);
+  end);
+  describe('token variety in: \'(a!) "hello, world""unfinished\\nline"\'', fn ()do
+    var token;
+    var lexer = SjsLexer('(a!) "hello, world""unfinished\nline"');
+    beforeEach(fn ()do
+      token = NextItem(lexer, true);
+    end);
+    it("next is open parenthesis", fn ()do
+      match(token, 'LPAREN', '(');
+    end);
+    it("next is symbol 'a'", fn ()do
+      match(token, 'SYMBOL', 'a');
+    end);
+    it("next is unknown ('!')", fn ()do
+      match(token, 'NOT', '!');
+    end);
+    it("next is close parenthesis", fn ()do
+      match(token, 'RPAREN', ')');
+    end);
+    it("next is whitespace", fn ()do
+      match(token, 'WHITESPACE', ' ');
+    end);
+    it('next is "" string', fn ()do
+      match(token, 'STRING', '"hello, world"');
+    end);
+    it('next is bad string', fn ()do
+      match(token, 'BADSTRING', '"unfinished');
+    end);
+    it('next is newline', fn ()do
+      match(token, 'NEWLINE', '\n');
+    end);
+    it("next is symbol 'line'", fn ()do
+      match(token, 'SYMBOL', 'line');
+    end);
+    it('next is bad string', fn ()do
+      match(token, 'BADSTRING', '"');
+    end);
+    it('nothing left', fn ()do
+      match(token, 'EOF', '');
+    end);
+  end);
+  describe('newline in strings', fn ()do
+    it("double-quoted strings should not span lines", fn ()do
+      let lexer = SjsLexer('"stuff\nand\nnonsense"');
+      let token = NextItem(lexer, true);
+      match(token, 'BADSTRING', '"stuff');
+    end);
+    it("single-quoted strings should not span lines", fn ()do
+      let lexer = SjsLexer("'stuff\nand\nnonsense'");
+      let token = NextItem(lexer, true);
+      match(token, 'BADSTRING', "'stuff");
+    end);
+    it("back-quoted strings may span lines", fn ()do
+      let lexer = SjsLexer('`stuff\nand\nnonsense`');
+      let token = NextItem(lexer, true);
+      match(token, 'STRING', '`stuff\nand\nnonsense`');
+    end);
+  end);
+  describe('strings should be terminated', fn ()do
+    it("double-quoted strings should end with double-quote", fn ()do
+      let lexer = SjsLexer('"stuff');
+      let token = NextItem(lexer, true);
+      match(token, 'BADSTRING', '"stuff');
+    end);
+    it("single-quoted strings should end with single-quote", fn ()do
+      let lexer = SjsLexer("'stuff");
+      let token = NextItem(lexer, true);
+      match(token, 'BADSTRING', "'stuff");
+    end);
+    it("back-quoted strings should end with back-quote", fn ()do
+      let lexer = SjsLexer('`stuff\nand\nnonsense');
+      let token = NextItem(lexer, true);
+      match(token, 'BADSTRING', '`stuff');
+    end);
+  end);
+end);

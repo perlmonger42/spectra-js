@@ -1,0 +1,123 @@
+// module main;
+import { NewLexer} from "../src/sjs-lexer.mjs";
+import { NewParser, Parse} from "../src/sjs-parser.mjs";
+import { Generate} from "../src/emit-js.mjs";
+import * as fs from 'fs';
+
+
+let Verbose = false;
+
+let OutputLanguage = 'js';
+
+let InputLanguage = 'sjs';
+
+fn transpile_from_string(input_filename, input_text, writer) do
+  //console.log("Parsing...");
+  
+  let unit = Parse(NewParser(InputLanguage, NewLexer(input_filename, InputLanguage, input_text)));
+  if unit.Tag == 'Just' then
+    //console.log("Generating...");
+    
+    Generate(OutputLanguage, input_filename, unit.Just, writer);
+  else
+    console.error("Failed");
+  end
+end
+
+fn generate_output_filename(input_filename, output_dirname) do
+  let extensionMatcher = new RegExp('[.][^.]*$|$');
+  let outputExtension = OutputLanguage === 'js' ? '.mjs' : '.sp1';
+  if output_dirname === '' then
+    // output name is input name with extension changed to `.compiled.{mjs,js}`
+    
+    return input_filename.replace(extensionMatcher, `.compiled${outputExtension}`);
+  end
+  // output name is `${output_dirname}/${input_leafname}` with extension changed to `.{mjs,js}`
+  
+  let leafname = input_filename.match(/(?<=[/]|^)(?<leaf>[^/]*)$/).groups.leaf;
+  leafname = leafname.replace(extensionMatcher, outputExtension);
+  return `${output_dirname}/${leafname}`;
+end
+
+fn transpile_filename(input_filename, output_dirname) do
+  if /[.][ms]?js$/.test(input_filename) then
+    InputLanguage = 'sjs';
+  elsif /[.]sp1$/.test(input_filename) then
+    InputLanguage = 'sp1';
+  else
+    usage_error(`filename extension unrecognized in '${input_filename}'`);
+  end
+  if Verbose then
+    console.log(input_filename);
+  end
+  let file_content;
+  //console.log(`Reading ${input_filename}`);
+  
+  file_content = fs.readFileSync(input_filename, 'utf8');
+  let js = '';
+  let writer = (text) => do
+    js += text;
+  end;
+  //console.log(`Transpiling ${input_filename}`);
+  
+  transpile_from_string(input_filename, file_content, writer);
+  let extension = new RegExp('[.][^.]*$|$');
+  let output_filename = generate_output_filename(input_filename, output_dirname);
+  //console.log(`Writing \`${output_filename}\``);
+  
+  fs.writeFileSync(output_filename, js, 'utf8');
+end
+
+fn usage() do
+  console.error(`usage: node prism [--out-dir=...] [--output-language=(js|sp1)] filename...`);
+  console.error(`  output filename will be *.mjs or *.sp1, depending on --output-language`);
+  console.error(`  if no --out-dir is given, output filename will be *.compiled.{mjs,sp1}`);
+end
+
+fn usage_error(msg) do
+  usage();
+  throw new Error(msg);
+end
+
+// When run as
+//     node cmd/prism.mjs INPUT.mjs
+// we get
+//     argv[0] == 'node'
+//     argv[1] == 'cmd/prism.mjs'
+//     argv[2] == 'INPUT.mjs'
+
+
+fn main() do
+  let argv = Array.from(process.argv);
+  if argv.length > 0 && /\/node$/.test(argv[0]) then
+    argv.shift();
+    // remove 'node' as program name (treat argv[1] as program name)
+    
+  end
+  argv.shift();
+  // skip this script's filename
+  
+  let output_dirname = '';
+  let file_count = 0;
+  for let arg of argv do
+    let m;
+    if m = arg.match(/^--out-dir=(?<dir>.*)$/) then
+      output_dirname = m.groups.dir;
+    elsif m = arg.match(/^--output-language=(?<lang>.*)$/) then
+      OutputLanguage = m.groups.lang;
+      if OutputLanguage !== 'js' && OutputLanguage !== 'sp1' then
+        usage_error(`--output-language: language '${OutputLanguage}' is not supported`);
+      end
+    elsif /^(-v|--verbose)$/.test(arg) then
+      Verbose = true;
+    else
+      file_count++;
+      transpile_filename(arg, output_dirname);
+    end
+  end
+  if file_count == 0 then
+    usage();
+  end
+end
+
+main();

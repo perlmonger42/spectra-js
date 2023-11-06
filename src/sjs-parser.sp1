@@ -1,0 +1,1947 @@
+// module main;
+import { NextItem, LocAfter} from "./sjs-lexer.mjs";
+
+
+// Tokens are objects with this format:
+//   { Kind: 'Token', Type: string, Text: string, Line: integer, Column: integer, Offset: integer }
+// Type is the kind of token, e.g. "SYMBOL" or "PLUS".
+// Text is the spelling of the token, e.g. "fred" or "+".
+// Line and Column are 1-based, and give the position of the token's first character.
+// Offset is 0-based, and gives the same position in bytes relative to the
+// beginning of the source code.
+//
+// Type and Text are identical for keywords (e.g., "if" and "if").  For all
+// other kinds of token, they are typically different (e.g., "FIXNUM" and
+// "42").
+
+
+export fn NewParser(language, lexer) do
+  let is_spectra = language === 'sp1';
+  let function_kw = is_spectra ? 'fn' : 'function';
+  let parser = {
+    is_spectra,
+    language,
+    lexer,
+    current_token: NextItem(lexer, false, true),
+    function_kw,
+    initial_expression_tokens: [
+      'SYMBOL',
+      'BOOLEAN',
+      'FIXNUM',
+      'STRING',
+      'REGEXP',
+      'LPAREN',
+      'MINUS',
+      'PLUS',
+      'NOT',
+      'LBRACE',
+      'LBRACK',
+      'new',
+      'typeof',
+      function_kw
+    ]
+  };
+  return parser;
+end
+
+// showToken(token) prints the token
+
+
+fn showToken(token) do
+  console.log(describe(token));
+end
+
+// showCurrentToken() prints the current token
+
+
+fn showCurrentToken(parser) do
+  return showToken(parser.current_token);
+end
+
+export fn InternalError(message) do
+  this.name = "InternalError";
+  this.message = message || "";
+end
+
+InternalError.prototype = Error.prototype;
+
+InternalError.prototype = new Error();
+
+export fn describe_type(kind, tag) do
+  if kind === 'string' then
+    if typeof tag === 'regex' then
+      return `string matching ${tag}`;
+    elsif typeof tag === 'string' then
+      return `string with value '${value}'`;
+    end
+    return 'string';
+  elsif kind === 'boolean' then
+    if typeof tag === 'boolean' then
+      return `boolean with value '${value}'`;
+    end
+    return 'boolean';
+  elsif kind === 'Array' then
+    return 'Array';
+  elsif kind === 'Maybe' then
+    return `Maybe(${tag})`;
+  elsif kind === 'Result' then
+    return `Result(${tag})`;
+  elsif typeof tag === 'string' then
+    return `${kind}.${tag}`;
+  else
+    return kind;
+  end
+end
+
+export fn describe_value(value) do
+  return describe(value, 70);
+end
+
+export fn describe(value, maxlen) do
+  let type = typeof value;
+  if value === null then
+    return 'null';
+  elsif type === 'undefined' then
+    return truncate('undefined', maxlen);
+  elsif type === 'string' then
+    return truncate_and_surround("'", `${value}`, "'", maxlen);
+  elsif type === 'boolean' || type === 'number' then
+    return truncate(`${value}`, maxlen);
+  elsif Array.isArray(value) then
+    let [content, comma] = [
+      '',
+      ''
+    ];
+    for let v of value do
+      content = `${content}${comma}${describe(v, maxlen-content.length)}`;
+      if content.length > maxlen then
+        break;
+      end
+      comma = ", ";
+    end
+    return truncate_and_surround('[', content, ']', maxlen);
+  elsif isNone(value) then
+    return truncate_and_surround('None(', value.Type, ')', maxlen);
+  elsif isJust(value) then
+    return truncate_and_surround('Just(', describe(value.Just, maxlen - 6), ')', maxlen);
+  elsif isOk(value) then
+    return truncate_and_surround('Ok(', describe(value.Value, maxlen - 4), ')', maxlen);
+  elsif isErr(value) then
+    return truncate_and_surround('Err(', value.Error, ')', maxlen);
+  elsif type === 'object' && typeof value.Kind === 'string' then
+    let type = typeof value.Tag !== 'string' ? value.Kind : value.Kind + '.' + value.Tag;
+    let [content, comma] = [
+      '',
+      ''
+    ];
+    for let [key, val] of Object.entries(value) do
+      if key === 'Kind' || key === 'Tag' && typeof val === 'string' then
+        continue;
+      end
+      content = `${content}${comma}${key}: ${describe(val, maxlen - content.length)}`;
+      if content.length > maxlen then
+        break;
+      end
+      comma = ", ";
+    end
+    return truncate_and_surround(`${type}(`, content, ')', maxlen);
+  elsif type === 'object' then
+    let [content, comma] = [
+      '',
+      ''
+    ];
+    for let [key, val] of Object.entries(value) do
+      content = `${content}${comma}${key}: ${describe(val, maxlen - content.length)}`;
+      if content.length > maxlen then
+        break;
+      end
+      comma = ", ";
+    end
+    return truncate_and_surround('{', content, '}', maxlen);
+  end
+  return truncate_and_surround('(', `${typeof value} ${value}`, ')', maxlen);
+end
+
+fn truncate(value, maxlen) do
+  if value.length > maxlen then
+    return value.substring(0, maxlen - 3) + '...';
+  end
+  return value;
+end
+
+fn truncate_and_surround(prefix, value, postfix, maxlen) do
+  return `${prefix}${truncate(value, maxlen - (prefix.length + postfix.length))}${postfix}`;
+end
+
+//// /unction expect_type(value, kind, tag) {
+////   let check_tag_value = function() { typeof(tag) === 'undefined' || tag == value; };
+////   let ok = true;
+////   if (kind === 'boolean') {
+////     ok = typeof(value) === 'boolean' && check_tag_value();
+////   } else if (kind === 'string') {
+////     if (typeof(value) !== 'string'){
+////       ok = false;
+////     } else if (tag && tag !== value) {
+////       ok = false;
+////     }
+////   } else if (kind === 'Array') {
+////     ok = Array.isArray(value);
+////   } else if (kind === 'regex') {
+////     if (typeof(value) !== 'string') {
+////       return Err(`expected string, but got ${typeof value} instead (${vlue})`);
+////     } else if (!tag.test(value)) {
+////       return Err(`expected string matching ${tag}, but got '${value}' instead)`);
+////     }
+////     return Ok(true);
+////   } else if (typeof(value) !== 'object') {
+////     err = "a value that is not an object";
+////   } else if (!value.hasOwnProperty('Kind')) {
+////     err = "an object with no `Kind` field";
+////   } else if (value.Kind !== kind) {
+////     err = `an object with \`Kind='${value.Kind}'\``;
+////   } else if (tag && !value.hasOwnProperty('Tag')) {
+////     err = "an object with no `Tag` field";
+////   } else if (tag && value.Tag !== tag) {
+////     err = `an object with \`Tag='${value.Tag}'\``;
+////   } else {
+////     return true;
+////   }
+////
+////   let expected_fields = `Kind: '${kind}'`;
+////   if (tag) { expected_fields = `${expected_fields}, Tag: '${tag}'`; }
+////   let expected = `${value_name} should be { ${expected_fields}, ... }`;
+////   let message = `${expected}, but is ${err}: ${JSON.stringify(value)}`;
+////   console.log(`${message}:`, value);
+//// }
+
+
+export fn assert_is_boolean(value_name, value) do
+  if typeof value !== 'boolean' then
+    throw new InternalError(`${value_name} is not a boolean; it is ${describe_value(value)}`);
+  end
+end
+
+export fn assert_is_string(value_name, value) do
+  if typeof value !== 'string' then
+    throw new InternalError(`${value_name} is not a string; it is ${describe_value(value)}`);
+  end
+end
+
+export fn assert_is_number(value_name, value) do
+  if typeof value !== 'number' then
+    throw new InternalError(`${value_name} is not a number; it is ${describe_value(value)}`);
+  end
+end
+
+export fn assert_is_string_equal(value_name, value, expected_value) do
+  assert_is_string(value_name, value);
+  if value !== expected_value then
+    throw new InternalError(`${value_name} is not '${expected_value}'; it is ${describe_value(value)}`);
+  end
+end
+
+export fn assert_is_string_match(value_name, value, regex) do
+  assert_is_string(value_name, value);
+  if !regex.test(value) then
+    throw new InternalError(`${value_name} does not match ${regex}; it is ${describe_value(value)}`);
+  end
+end
+
+export fn assert_is_token(value_name, value) do
+  assert_is_kind(value_name, value, 'Token');
+  assert_is_string(`${value_name}.Type`, value.Type);
+  assert_is_string(`${value_name}.Text`, value.Text);
+  assert_is_loc(`${value_name}.Loc`, value.Loc);
+end
+
+export fn assert_is_token_type(value_name, value, type) do
+  assert_is_token(value_name, value);
+  if value.Type !== type then
+    let err = `${value_name}.Type is not '${type}'; it is ${describe_value(value.Type)}`;
+    throw new InternalError(err);
+  end
+end
+
+export fn assert_is_token_match(value_name, value, regex) do
+  assert_is_token(value_name, value);
+  if !regex.test(value.Text) then
+    let err = `${value_name}.Text does not match ${regex}; it is ${describe_value(value.Text)}`;
+    throw new InternalError(err);
+  end
+end
+
+export fn assert_is_token_equal(value_name, value, expected_value) do
+  assert_is_token(value_name, value);
+  if value.Text !== expected_value then
+    let err = `${value_name}.Text is not '${expected_value}'; it is ${describe_value(value.Text)}`;
+    throw new InternalError(err);
+  end
+end
+
+export fn assert_is_loc(value_name, value) do
+  assert_is_kind(value_name, value, 'Loc');
+  assert_is_string(`${value_name}.File`, value.File);
+  assert_is_number(`${value_name}.Line`, value.Line);
+  assert_is_number(`${value_name}.Column`, value.Column);
+  assert_is_number(`${value_name}.Offset`, value.Offset);
+end
+
+export fn assert_is_list(value_name, value) do
+  if !Array.isArray(value) then
+    throw new InternalError(`${value_name} is not a list; it is ${describe_value(value)}`);
+  end
+end
+
+export fn assert_is_list_of(value_name, value, element_type_asserter) do
+  assert_is_list(value_name, value);
+  let index = -1;
+  while index + 1 < value.length do
+    index++;
+    element_type_asserter(`${value_name}[${index}]`, value[index]);
+  end
+end
+
+export fn token_asserter() do
+  return fn (value_name, value)do
+    assert_is_token(value_name, value);
+  end;
+end
+
+export fn token_type_asserter(type) do
+  return fn (value_name, value)do
+    assert_is_token_type(value_name, value, type);
+  end;
+end
+
+export fn string_asserter() do
+  return fn (value_name, value)do
+    assert_is_string(value_name, value);
+  end;
+end
+
+export fn kind_asserter(kind) do
+  return fn (value_name, value)do
+    assert_is_kind(value_name, value, kind);
+  end;
+end
+
+export fn kind_tag_asserter(kind, tag) do
+  return fn (value_name, value)do
+    assert_is_kind_tag(value_name, value, kind, tag);
+  end;
+end
+
+export fn kind_tag_checker(kind, tag) do
+  return fn (value)do
+    return is_kind_tag(value, kind, tag);
+  end;
+end
+
+export fn assert_is_kind(value_name, value, kind) do
+  let err;
+  if typeof value !== 'object' then
+    err = `${value_name} is not a ${kind}, nor even an object; it is ${describe_value(value)}`;
+  elsif !value.hasOwnProperty('Kind') then
+    err = `${value_name} is not a ${kind}, and has no 'Kind' field; it is ${describe_value(value)}`;
+  elsif value.Kind !== kind then
+    err = `${value_name} is not a ${kind}; it is ${describe_value(value)}`;
+  else
+    return;
+  end
+  throw new InternalError(err);
+end
+
+export fn is_kind(value, kind) do
+  return value !== null && typeof value === 'object' && value.hasOwnProperty('Kind') && value.Kind === kind;
+end
+
+export fn is_kind_tag(value, kind, tag) do
+  return is_kind(value, kind) && value.hasOwnProperty('Tag') && value.Tag === tag;
+end
+
+export fn is_list_of(value, element_type_checker) do
+  if !Array.isArray(value) then
+    return false;
+  end
+  for let v of value do
+    if !element_type_checker(v) then
+      return false;
+    end
+  end
+  return true;
+end
+
+export fn assert_is_kind_tag(value_name, value, kind, tag) do
+  let err;
+  assert_is_kind(value_name, value, kind);
+  if !value.hasOwnProperty('Tag') then
+    err = `${value_name} is not ${kind}.${tag} (it has no 'Tag' field); it is ${describe_value(value)}`;
+  elsif value.Tag !== tag then
+    err = `${value_name} is not ${kind}.${tag}; it is ${describe_value(value)}`;
+  else
+    return;
+  end
+  throw new InternalError(err);
+end
+
+fn NewSyntaxError(message, token) do
+  let name = token.Type === token.Text ? token.Type : `${token.Type} (\`${token.Text}\`)`;
+  let line = token.Loc.Line;
+  let column = token.Loc.Column;
+  return SyntaxError(`${message}; found ${name} at line ${line} column ${column}`);
+end
+
+fn NewSyntaxErrorAt(message, ast_node) do
+  let line = ast_node.Loc.Line;
+  let column = ast_node.Loc.Column;
+  return SyntaxError(`${message}; found ${name} at line ${line} column ${column}`);
+end
+
+// An item of type Maybe(T) has either this structure:
+//   None = { Kind: 'Maybe'
+//          , Tag:  'None'
+//          , Type: 'T'
+//          }
+// or this structure:
+//   Just = { Kind: 'Maybe'
+//          , Tag:  'Just'
+//          , Just: { Kind: 'T', ... }
+//          }
+
+
+export fn Just(data) do
+  return {
+    Kind: 'Maybe',
+    Tag: 'Just',
+    Just: data
+  };
+end
+
+export fn None(typename) do
+  return {
+    Kind: 'Maybe',
+    Tag: 'None',
+    Type: typename,
+    None: true
+  };
+end
+
+export fn isNone(value) do
+  return is_kind_tag(value, 'Maybe', 'None') && value.hasOwnProperty('Type') && typeof value.Type === 'string';
+end
+
+export fn isJust(value) do
+  return is_kind_tag(value, 'Maybe', 'Just') && value.hasOwnProperty('Just');
+end
+
+export fn assert_is_maybe_kind(value_name, value, kind) do
+  assert_is_kind(value_name, value, 'Maybe');
+  if isNone(value) then
+    assert_is_string_equal(`${value_name}.Type`, value.Type, kind);
+  elsif isJust(value) then
+    assert_is_kind(`${value_name}.Just`, value.Just, kind);
+  end
+end
+
+// An item of type Result(E, V) has either this structur:
+//   Ok   = { Kind: 'Result'
+//          , Tag:  'Ok'
+//          , Value: <value of type V>
+//          }
+// or this structure:
+//   Err  = { Kind: 'Result'
+//          , Tag:  'Err'
+//          , Error: <value of type E>
+//          }
+
+
+export fn Ok(data) do
+  return {
+    Kind: 'Result',
+    Tag: 'Ok',
+    Value: data
+  };
+end
+
+export fn Err(data) do
+  return {
+    Kind: 'Result',
+    Tag: 'Err',
+    Error: data
+  };
+end
+
+fn isOk(value) do
+  return is_kind_tag('Result', 'Ok') && value.hasOwnProperty('Value');
+end
+
+fn isErr(value) do
+  return is_kind_tag('Result', 'Err') && value.hasOwnProperty('Error');
+end
+
+//export function assert_is_result_type(value_name, value, ok_kind, ok_tag, err_kind, err_tag) {
+//  if (isOk(value)) {
+//    assert_is_kind_tag(`${value_name}.Value`, value.Value, ok_kind, ok_tag);
+//  } else if (isErr(value)) {
+//    assert_is_kind_tag(`${value_name}.Error`, value.Error, err_kind, err_tag);
+//  } else {
+//    assert_is_kind_tag(value_name, value, 'Result', 'Ok|Err');
+//  }
+//}
+// curtok() returns parser.current_token
+
+
+fn curtok(parser) do
+  return parser.current_token;
+end
+
+// peek() returns the TYPE of the current token, without advancing the input.
+
+
+fn peek(parser) do
+  return parser.current_token.Type;
+end
+
+// text() returns the TEXT of the current token, without advancing the input.
+
+
+fn text(parser) do
+  return parser.current_token.Text;
+end
+
+// advance() returns the current token, and makes the next token current.
+// Throws an exception on attempts to advance past end-of-input.
+
+
+fn advance(parser) do
+  if peek(parser) === 'EOF' then
+    throw new SyntaxError("cannot advance past end-of-input");
+  end
+  let token = parser.current_token;
+  parser.current_token = NextItem(parser.lexer, false, true);
+  return token;
+end
+
+// match(TYPE) returns peek() == TYPE. Does not advance input.
+
+
+fn match(parser, type) do
+  return peek(parser) === type;
+end
+
+// match_any([TYPE1, TYPE2, ...]) returns true if peek() returns any TYPEn.
+// Does not advance input.
+
+
+fn match_any(parser, types) do
+  let token = peek(parser);
+  let index = -1;
+  while index + 1 < types.length do
+    index++;
+    if token === types[index] then
+      return true;
+    end
+  end
+  return false;
+end
+
+// skip(TYPE) returns the current token and advances the input iff peek === TYPE;
+// otherwise, returns null.
+
+
+fn skip(parser, type) do
+  if match(parser, type) then
+    return advance(parser);
+  end
+  return null;
+end
+
+// skip_any([TYPE1, TYPE2, ...]) checks the current token, and if it is any of the TYPEn,
+// it returns Just(curtok(parser)) and advances the input; otherwise, returns None('Token').
+
+
+fn skip_any(parser, types) do
+  let token = curtok(parser);
+  let index = -1;
+  while index + 1 < types.length do
+    index++;
+    if skip(parser, types[index]) then
+      return Just(token);
+    end
+  end
+  return None('Token');
+end
+
+// expect(TYPE) returns the current token and advances the input iff peek === TYPE;
+// otherwise, it throws a SyntaxError exception.
+
+
+fn expect(parser, type, message) do
+  if type === 'EOF' && match(parser, type) then
+    return parser.current_token;
+  elsif match(parser, type) then
+    return advance(parser);
+  end
+  if typeof message === 'undefined' then
+    message = `expected \`${type}\``;
+  end
+  let token = parser.current_token;
+  let found = token.Type === token.Text ? token.Type : `${token.Type} (\`${token.Text}\`)`;
+  let line = token.Loc.Line;
+  let column = token.Loc.Column;
+  throw new SyntaxError(`${line}:${column}: ${message} but found \`${found}\` at line ${line} column ${column}`);
+end
+
+fn identifier_list(parser) do
+  //console.log(`identifier_list, at ${showCurrentToken(parser)}`);
+  
+  let identifiers = [ ];
+  let commas = [ ];
+  while true do
+    let identifier = skip(parser, 'SYMBOL');
+    if !identifier then
+      break;
+      // throw NewSyntaxError("expected IDENTIFIER", curtok(parser));
+      
+    end
+    identifiers.push(identifier);
+    let comma = skip(parser, 'COMMA');
+    if !comma then
+      break;
+    end
+    commas.push(comma);
+  end
+  //console.log(`identifier_list, at ${showCurrentToken(parser)}`);
+  
+  return New_List_Identifiers(identifiers, commas);
+end
+
+fn optional_identifier_list(parser) do
+  //console.log(`optional_identifier_list, at ${showCurrentToken(parser)}`);
+  
+  if match(parser, 'SYMBOL') then
+    let list = identifier_list(parser);
+    //console.log(`after identifier_list in optional_identifier_list, at ${showCurrentToken(parser)}`);
+    
+    return list;
+  end
+  //console.log(`after peek(SYMBOL) in optional_identifier_list, at ${showCurrentToken(parser)}`);
+  
+  return New_List_Identifiers([ ], [ ]);
+end
+
+export fn New_Literal_Boolean(Token) do
+  let Text = Token.Text;
+  let Value = Text === 'true';
+  let Loc = Token.Loc;
+  return {
+    Kind: 'Literal',
+    Tag: 'Boolean',
+    Value,
+    Text,
+    Loc
+  };
+end
+
+export fn New_Literal_Fixnum(Token) do
+  let Text = Token.Text;
+  let Value = parseInt(Text);
+  let Loc = Token.Loc;
+  return {
+    Kind: 'Literal',
+    Tag: 'Fixnum',
+    Value,
+    Text,
+    Loc
+  };
+end
+
+export fn New_Literal_Flonum(Token) do
+  let Text = Token.Text;
+  let Value = parseFloat(Text);
+  let Loc = Token.Loc;
+  return {
+    Kind: 'Literal',
+    Tag: 'Flonum',
+    Value,
+    Text,
+    Loc
+  };
+end
+
+export fn New_Literal_String(Token) do
+  let Text = Token.Text;
+  let Value = parseString(Text);
+  let Loc = Token.Loc;
+  return {
+    Kind: 'Literal',
+    Tag: 'String',
+    Value,
+    Text,
+    Loc
+  };
+end
+
+export fn New_Literal_Regexp(Token) do
+  let Text = Token.Text;
+  let Value = parseRegexp(Text);
+  let Loc = Token.Loc;
+  return {
+    Kind: 'Literal',
+    Tag: 'Regexp',
+    Value,
+    Text,
+    Loc
+  };
+end
+
+export fn New_Literal_Function(Fn, Name, Signature, Body) do
+  assert_is_token_match("New_Literal_Function.Fn", Fn, /^(fn|function)$/);
+  assert_is_token_type("New_Literal_Function.Name", Name, 'SYMBOL');
+  assert_is_kind("New_Literal_Function.Signature", Signature, 'FunctionSignature');
+  assert_is_kind_tag("New_Literal_Function.Body", Body, 'Statement', 'Block');
+  return {
+    Kind: 'Literal',
+    Tag: 'Function',
+    Fn,
+    Name,
+    Signature,
+    Body
+  };
+end
+
+export fn New_Literal_ArrowFunctionExpression(Arrow, Formals, Expr) do
+  assert_is_token_equal("New_Literal_ArrowFunctionExpression.Arrow", Arrow, '=>');
+  assert_is_kind_tag("New_Literal_ArrowFunctionExpression.Formals", Formals, 'Expression', 'List');
+  assert_is_kind("New_Literal_ArrowFunctionExpression.Expr", Expr, 'Expression');
+  return {
+    Kind: 'Literal',
+    Tag: 'ArrowFunctionExpression',
+    Formals,
+    Expr
+  };
+end
+
+export fn New_Literal_ArrowFunctionBlock(Arrow, Formals, Block) do
+  assert_is_token_equal("New_Literal_ArrowFunctionBlock.Arrow", Arrow, '=>');
+  assert_is_kind_tag("New_Literal_ArrowFunctionBlock.Formals", Formals, 'Expression', 'List');
+  assert_is_kind("New_Literal_ArrowFunctionBlock.Block", Block, 'Statement', 'Block');
+  return {
+    Kind: 'Literal',
+    Tag: 'ArrowFunctionBlock',
+    Formals,
+    Block
+  };
+end
+
+export fn New_Expression_Grouping(Opener, Closer, Expr) do
+  assert_is_token_equal('New_Expression_Grouping.Opener', Opener, '(');
+  assert_is_token_equal('New_Expression_Grouping.Closer', Closer, ')');
+  assert_is_kind('New_Expression_Grouping.Expr', Expr, 'Expression');
+  return {
+    Kind: 'Expression',
+    Tag: 'Grouping',
+    Opener,
+    Closer,
+    Expr
+  };
+end
+
+export fn New_Expression_Symbol(Token) do
+  assert_is_token_type('New_Expression_Symbol.Token', Token, 'SYMBOL');
+  return {
+    Kind: 'Expression',
+    Tag: 'Symbol',
+    Name: Token.Text,
+    Loc: Token.Loc
+  };
+end
+
+export fn New_Expression_Literal(Literal) do
+  return {
+    Kind: 'Expression',
+    Tag: 'Literal',
+    Literal
+  };
+end
+
+let prefix_unary_ops = new RegExp('^(new|[-+!]|typeof|await)$');
+
+export fn New_Expression_UnaryPrefix(Operator, Operand) do
+  assert_is_token_match('New_Expression_UnaryPrefix.Operator', Operator, prefix_unary_ops);
+  assert_is_kind('New_Expression_UnaryPrefix.Operand', Operand, 'Expression');
+  if Operator.Text === 'new' then
+    assert_is_kind_tag('New_Expression_UnaryPrefix.Operand', Operand, 'Expression', 'Symbol');
+  end
+  return {
+    Kind: 'Expression',
+    Tag: 'Unary',
+    Prefix: true,
+    Operator,
+    Operand
+  };
+end
+
+let postfix_unary_ops = new RegExp('^(--|[+][+])$');
+
+export fn New_Expression_UnaryPostfix(Operator, Operand) do
+  assert_is_token_match('New_Expression_UnaryPostfix.Operator', Operator, postfix_unary_ops);
+  assert_is_kind('New_Expression_UnaryPostfix.Operand', Operand, 'Expression');
+  return {
+    Kind: 'Expression',
+    Tag: 'Unary',
+    Prefix: false,
+    Operator,
+    Operand
+  };
+end
+
+let binary_ops = new RegExp('^(new|[-+*/%.,]|===?|!==?|[-+*/]?=|[|][|]|[&][&]|<=?|>=?|\\[)$');
+
+export fn New_Expression_Binary(Operator, Left, Right) do
+  assert_is_token_match('New_Expression_Binary.Operator', Operator, binary_ops);
+  assert_is_kind('New_Expression_Binary.Left', Left, 'Expression');
+  assert_is_kind('New_Expression_Binary.Right', Right, 'Expression');
+  if Operator.Text === 'new' then
+    assert_is_kind_tag('New_Expression_Binary.Right', Right, 'Expression', 'List');
+  end
+  return {
+    Kind: 'Expression',
+    Tag: 'Binary',
+    Operator,
+    Left,
+    Right
+  };
+end
+
+export fn New_Expression_PostCircumfix(DelimiterLeft, DelimiterRight, Left, Right) do
+  assert_is_kind('New_Expression_PostCircumfix.Left', Left, 'Expression');
+  assert_is_kind('New_Expression_PostCircumfix.Right', Right, 'Expression');
+  assert_is_token_match('New_Expression_PostCircumfix.DelimiterLeft', DelimiterLeft, /[\[(]/);
+  assert_is_token_match('New_Expression_PostCircumfix.DelimiterRight', DelimiterRight, /[\])]/);
+  return {
+    Kind: 'Expression',
+    Tag: 'PostCircumfix',
+    DelimiterLeft,
+    DelimiterRight,
+    Left,
+    Right
+  };
+end
+
+export fn New_Expression_Ternary(OperatorLeft, OperatorRight, Left, Middle, Right) do
+  assert_is_token_equal('New_Expression_Ternary.OperatorLeft', OperatorLeft, '?');
+  assert_is_token_equal('New_Expression_Ternary.OperatorRight', OperatorRight, ':');
+  assert_is_kind('New_Expression_Ternary.Left', Left, 'Expression');
+  assert_is_kind('New_Expression_Ternary.Middle', Middle, 'Expression');
+  assert_is_kind('New_Expression_Ternary.Right', Right, 'Expression');
+  return {
+    Kind: 'Expression',
+    Tag: 'Ternary',
+    OperatorLeft,
+    OperatorRight,
+    Left,
+    Middle,
+    Right
+  };
+end
+
+export fn New_Expression_Apply(Functor, Arguments) do
+  assert_is_kind("New_Expression_Apply.Functor", Functor, 'Expression');
+  assert_is_kind_tag("New_Expression_Apply.Arguments", Arguments, 'Expression', 'List');
+  let leftParen = Arguments.Opener;
+  let rightParen = Arguments.Closer;
+  assert_is_token_equal("New_Expression_Apply.Arguments.Opener", leftParen, '(');
+  assert_is_token_equal("New_Expression_Apply.Arguments.Closer", rightParen, ')');
+  return New_Expression_PostCircumfix(leftParen, rightParen, Functor, Arguments);
+end
+
+export fn parseString(text) do
+  // TODO: This needs to convert escape sequence to the values they represent.
+  // It should also remove the surrounding "", '', or `` characters.
+  
+  return text;
+end
+
+fn parseRegexp(text) do
+  // TODO: Does this need to do anything?
+  
+  return text;
+end
+
+export fn New_Expression_Pair(Operator, Key, Value) do
+  // TODO: Consider whether this should just be a Binary with Operator == ':'
+  
+  assert_is_maybe_kind('New_Expression_Pair.Operator', Operator, 'Token');
+  assert_is_kind('New_Expression_Pair.Key', Key, 'Expression');
+  assert_is_maybe_kind('New_Expression_Pair.Value', Value, 'Expression');
+  assert_is_string_match('New_Expression_Pair.Key.Tag', Key.Tag, /^(Symbol|Literal)$/);
+  if isJust(Operator) then
+    assert_is_token_equal('New_Expression_Pair.Operator.Just', Operator.Just, ':');
+  end
+  return {
+    Kind: 'Expression',
+    Tag: 'Pair',
+    Operator,
+    Key,
+    Value
+  };
+end
+
+export fn New_Expression_Object(DelimiterLeft, DelimiterRight, Pairs) do
+  assert_is_token_equal('New_Expression_Object.DelimiterLeft', DelimiterLeft, '{');
+  assert_is_token_equal('New_Expression_Object.DelimiterRight', DelimiterRight, '}');
+  assert_is_list_of('New_Expression_Object.Pairs', Pairs, kind_tag_asserter('Expression', 'Pair'));
+  return {
+    Kind: 'Expression',
+    Tag: 'Object',
+    DelimiterLeft,
+    DelimiterRight,
+    Pairs
+  };
+end
+
+fn object_constructor(parser) do
+  let kv_pairs = [ ];
+  let openCurly = expect(parser, 'LBRACE', 'expected `{`');
+  while !match_any(parser, [
+    'RBRACE',
+    'EOF'
+  ]) do
+    let tok = curtok(parser);
+    let key;
+    if skip(parser, 'SYMBOL') then
+      key = New_Expression_Symbol(tok);
+    elsif skip(parser, 'STRING') then
+      key = New_Expression_Literal(New_Literal_String(tok));
+    else
+      expect(parser, 'SYMBOL', 'expected SYMBOL or STRING (as object key)');
+    end
+    let value = None('Expression');
+    let colon = None('Token');
+    if match(parser, 'COLON') then
+      colon = Just(advance(parser));
+      value = Just(expr_no_comma(parser));
+    end
+    kv_pairs.push(New_Expression_Pair(colon, key, value));
+    if !skip(parser, 'COMMA') then
+      break;
+    end
+  end
+  let closeCurly = expect(parser, 'RBRACE', 'expected `}`');
+  return New_Expression_Object(openCurly, closeCurly, kv_pairs);
+end
+
+export fn New_Expression_List(Opener, Closer, Expressions, HasTrailingComma) do
+  assert_is_token('New_Expression_List.Opener', Opener);
+  assert_is_token('New_Expression_List.Closer', Closer);
+  assert_is_list_of('New_Expression_List.Expressions', Expressions, kind_asserter('Expression'));
+  assert_is_boolean('New_Expression_List.HasTrailingComma', HasTrailingComma);
+  return {
+    Kind: 'Expression',
+    Tag: 'List',
+    Opener,
+    Closer,
+    Expressions,
+    HasTrailingComma
+  };
+end
+
+export fn New_Expression_Array(Expressions) do
+  assert_is_kind_tag('New_Expression_Array.Expressions', Expressions, 'Expression', 'List');
+  assert_is_token_equal('New_Expression_Array.Expressions.Opener', Expressions.Opener, '[');
+  assert_is_token_equal('New_Expression_Array.Expressions.Closer', Expressions.Closer, ']');
+  return {
+    Kind: 'Expression',
+    Tag: 'Array',
+    Expressions
+  };
+end
+
+fn array_constructor(parser) do
+  return New_Expression_Array(delimited_expression_list(parser, "[]"));
+  // let expressions = [ ];
+  // while (!match_any(parser, ['RBRACK', 'EOF'])) {
+  //   let expression = expr(parser);
+  //   expressions.push(expression);
+  //   if (!skip(parser, 'COMMA')){
+  //     break;
+  //   }
+  // }
+  
+end
+
+fn function_literal(parser) do
+  // function_literal := function_kw SYMBOL? '(' identifier_list? ')' body
+  
+  let kw = expect(parser, parser.function_kw);
+  let name = skip(parser, 'SYMBOL') || {
+    Kind: 'Token',
+    Type: 'SYMBOL',
+    Text: '',
+    Loc: LocAfter(kw)
+  };
+  let signature = function_signature(parser);
+  let body = statement_block(parser, "at start of function body");
+  return New_Literal_Function(kw, name, signature, body);
+end
+
+fn peek_block(parser) do
+  return parser.is_spectra ? peek(parser) === 'do' : peek(parser) === 'LBRACE';
+end
+
+fn arrow_function_literal(parser, formals) do
+  assert_is_kind_tag("arrow_function_literal.formals", formals, 'Expression', 'List');
+  // arrow_function_literal := '(' identifiers ')' '=>' expression
+  // This is a very small subset of the arrow-function syntax of JavaScript;
+  // see https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Functions/Arrow_functions
+  
+  let arrow = expect(parser, 'ARROW');
+  // The parenthesized identifier list has already been consumed,
+  // but it was read as an expression list, so check that it is
+  // a list of identifiers.
+  
+  for let sym of formals.Expressions do
+    if !is_kind_tag(sym, 'Expression', 'Symbol') then
+      throw NewSyntaxError("expected identifier list before '=>'", formals.Opener.Just);
+    end
+  end
+  if peek_block(parser) then
+    return New_Literal_ArrowFunctionBlock(arrow, formals, statement_block(parser));
+  else
+    return New_Literal_ArrowFunctionExpression(arrow, formals, expr(parser));
+  end
+end
+
+fn constructor_call(parser) do
+  // constructor_call := 'new' SYMBOL '(' argument_list ')'
+  
+  let newToken = expect(parser, 'new');
+  let constructorToken = expect(parser, 'SYMBOL');
+  let symbol = New_Expression_Symbol(constructorToken);
+  if peek(parser) === 'LPAREN' then
+    let args_expression_list = parenthesized_expression_list(parser, {  });
+    return New_Expression_Binary(newToken, symbol, args_expression_list);
+  else
+    return New_Expression_UnaryPrefix(newToken, symbol);
+  end
+end
+
+fn factor(parser) do
+  // factor ::= '(' expr ')' | ('+'|'-') factor | SYMBOL | FIXNUM | FLONUM | STRING | REGEXP | factor arguments
+  
+  let value = null;
+  let spelling = text(parser);
+  if match(parser, 'EOF') then
+    throw new SyntaxError("unexpected end-of-input");
+  elsif peek(parser) === 'LPAREN' then
+    let exprs = parenthesized_expression_list(parser);
+    if exprs.length === 0 || peek(parser) === 'ARROW' then
+      value = New_Expression_Literal(arrow_function_literal(parser, exprs));
+    elsif exprs.Expressions.length === 1 && !exprs.HasTrailingComma then
+      return New_Expression_Grouping(exprs.Opener, exprs.Closer, exprs.Expressions[0]);
+    else
+      value = exprs;
+    end
+  elsif match(parser, 'PLUS') || match(parser, 'MINUS') || match(parser, 'NOT') then
+    let op = advance(parser);
+    let arg = factor(parser);
+    value = New_Expression_UnaryPrefix(op, arg);
+  elsif match(parser, 'LBRACE') then
+    value = object_constructor(parser);
+  elsif match(parser, 'LBRACK') then
+    value = array_constructor(parser);
+  elsif match(parser, parser.function_kw) then
+    value = New_Expression_Literal(function_literal(parser));
+  elsif match(parser, 'new') then
+    value = constructor_call(parser);
+  elsif match(parser, 'SYMBOL') then
+    value = New_Expression_Symbol(advance(parser));
+  elsif match(parser, 'BOOLEAN') then
+    value = New_Expression_Literal(New_Literal_Boolean(advance(parser)));
+  elsif match(parser, 'FIXNUM') then
+    value = New_Expression_Literal(New_Literal_Fixnum(advance(parser)));
+  elsif match(parser, 'FLONUM') then
+    value = New_Expression_Literal(New_Literal_Flonum(advance(parser)));
+  elsif match(parser, 'STRING') then
+    value = New_Expression_Literal(New_Literal_String(advance(parser)));
+  elsif match(parser, 'REGEXP') then
+    value = New_Expression_Literal(New_Literal_Regexp(advance(parser)));
+  else
+    throw NewSyntaxError('EXPRESSION expected', curtok(parser));
+  end
+  let more = true;
+  while more do
+    if match(parser, 'LPAREN') then
+      value = New_Expression_Apply(value, parenthesized_expression_list(parser, {  }));
+    elsif match(parser, 'DOT') then
+      let dotOp = advance(parser);
+      // in this position, {`throw`, `from`, `fn`} act as symbols, not keywords
+      
+      let field = skip(parser, 'throw') || skip(parser, 'from') || skip(parser, 'fn') || expect(parser, 'SYMBOL', "expected SYMBOL after `.`");
+      field.Type = 'SYMBOL';
+      value = New_Expression_Binary(dotOp, value, New_Expression_Symbol(field));
+    elsif match(parser, 'LBRACK') then
+      let leftBracket = advance(parser);
+      let index = expr(parser);
+      let rightBracket = expect(parser, 'RBRACK');
+      value = New_Expression_PostCircumfix(leftBracket, rightBracket, value, index);
+    else
+      more = false;
+    end
+  end
+  // console.log(`factor returning `); console.log(value);
+  
+  return value;
+end
+
+fn postfix_unary(parser) do
+  // postfix_unary ::= factor [ ('++'|'--') ]
+  
+  let arg = factor(parser);
+  if match_any(parser, [
+    'INC',
+    'DEC'
+  ]) then
+    let op = advance(parser);
+    arg = New_Expression_UnaryPostfix(op, arg);
+  end
+  return arg;
+end
+
+fn prefix_unary(parser) do
+  // prefix_unary ::= { ('-'|'+'|'!'|'++'|'--'|typeof|await) } postfix_unary
+  
+  if match_any(parser, [
+    'PLUS',
+    'MINUS',
+    'NOT',
+    'INC',
+    'DEC',
+    'typeof',
+    'await'
+  ]) then
+    let op = advance(parser);
+    let arg = prefix_unary(parser);
+    return New_Expression_UnaryPrefix(op, arg);
+  end
+  return postfix_unary(parser);
+end
+
+fn multiplicative(parser) do
+  // multiplicative ::= prefix_unary { ('*'|'/') prefix_unary }
+  
+  let left = prefix_unary(parser);
+  // console.log(`in multiplicative, lookahead is ${this.current_token}`);
+  
+  while match(parser, 'STAR') || match(parser, 'SLASH') do
+    let op = advance(parser);
+    let right = prefix_unary(parser);
+    left = New_Expression_Binary(op, left, right);
+  end
+  // console.log(`multiplicative returning `); console.log(left);
+  
+  return left;
+end
+
+fn additive(parser) do
+  // additive ::= multiplicative { ('+'|'-') multiplicative }
+  
+  let left = multiplicative(parser);
+  // console.log(`in additive, lookahead is ${this.current_token}`);
+  
+  while match(parser, 'PLUS') || match(parser, 'MINUS') do
+    let op = advance(parser);
+    let right = multiplicative(parser);
+    left = New_Expression_Binary(op, left, right);
+  end
+  // console.log(`additive returning `); console.log(left);
+  
+  return left;
+end
+
+fn relational(parser) do
+  // expr ::= additive { ('<'|'>'|'<='|'>=') additive }
+  
+  let left = additive(parser);
+  while match_any(parser, [
+    'LT',
+    'GT',
+    'GEQ',
+    'LEQ'
+  ]) do
+    let op = advance(parser);
+    let right = additive(parser);
+    left = New_Expression_Binary(op, left, right);
+  end
+  return left;
+end
+
+fn equality(parser) do
+  // expr ::= relational { ('==='|'=='|'!=='|'!=') relational }
+  
+  let left = relational(parser);
+  while match_any(parser, [
+    'IDENTICAL',
+    'NOTIDENTICAL',
+    'EQ',
+    'NEQ'
+  ]) do
+    let op = advance(parser);
+    let right = relational(parser);
+    left = New_Expression_Binary(op, left, right);
+  end
+  return left;
+end
+
+fn conjunction(parser) do
+  // expr ::= equality [ '&&' equality ] }
+  
+  let left = equality(parser);
+  while match(parser, 'AND') do
+    let op = advance(parser);
+    let right = equality(parser);
+    left = New_Expression_Binary(op, left, right);
+  end
+  return left;
+end
+
+fn disjunction(parser) do
+  // expr ::= conjunction [ '||' conjunction ] }
+  
+  let left = conjunction(parser);
+  while match(parser, 'OR') do
+    let op = advance(parser);
+    let right = conjunction(parser);
+    left = New_Expression_Binary(op, left, right);
+  end
+  return left;
+end
+
+fn assignment(parser) do
+  // expr ::= disjunction
+  //        | disjunction '=' assignment
+  //        | disjunction '?' disjunction : assignment
+  
+  let left = disjunction(parser);
+  if match(parser, 'ASSIGN') then
+    let op = advance(parser);
+    let right = assignment(parser);
+    left = New_Expression_Binary(op, left, right);
+  elsif match(parser, 'QUESTION') then
+    let questionOp = advance(parser);
+    let ifTrue = disjunction(parser);
+    let colonOp = expect(parser, 'COLON', "expected `:` after `expr ? expr`");
+    let ifFalse = assignment(parser);
+    return New_Expression_Ternary(questionOp, colonOp, left, ifTrue, ifFalse);
+  end
+  return left;
+end
+
+fn assignmentSequence(parser) do
+  // assignmentSequence ::= assignment { ',' assignment }
+  
+  let left = assignment(parser);
+  while match(parser, 'COMMA') do
+    let op = advance(parser);
+    let right = assignment(parser);
+    left = New_Expression_Binary(op, left, right);
+  end
+  return left;
+end
+
+fn expr_no_comma(parser) do
+  return assignment(parser);
+end
+
+fn expr(parser) do
+  return assignmentSequence(parser);
+end
+
+fn maybe_expr(parser) do
+  if match_any(parser, parser.initial_expression_tokens) then
+    return Just(expr(parser));
+  else
+  end
+  return None('Expression');
+end
+
+fn delimited_expression_list(parser, brackets) do
+  // delimited_expression_list     := parenthesized_expression_list | bracket_expression_list
+  // parenthesized_expression_list ::= '(' expression_list ')'
+  // bracketed_expression_list     ::= '[' expression_list ']'
+  // expression_list               := one_or_more_expressions ','? | /* empty */
+  // one_or_more_expressions       := expression | one_or_more_expressions ',' expression
+  
+  if brackets !== "()" && brackets !== "[]" then
+    let err = `delimited_expression_list.brackets is neither "()" nor "[]"; it is ${describe_value(brackets)}`;
+    throw new InternalError(err);
+  end
+  let openerType = brackets === "()" ? 'LPAREN' : 'LBRACK';
+  let closerType = brackets === "()" ? 'RPAREN' : 'RBRACK';
+  let expressions = [ ];
+  let hasTrailingComma = false;
+  let openToken = expect(parser, openerType, `expected \`${brackets[0]}\``);
+  while match_any(parser, parser.initial_expression_tokens) do
+    hasTrailingComma = false;
+    expressions.push(expr_no_comma(parser));
+    if !skip(parser, 'COMMA') then
+      break;
+    end
+    hasTrailingComma = true;
+  end
+  let closeToken = expect(parser, closerType, `expected \`${brackets[1]}\``);
+  return New_Expression_List(openToken, closeToken, expressions, hasTrailingComma);
+end
+
+fn bracketed_expression_list(parser) do
+  // bracketed_expression_list ::= '(' expression_list ')'
+  
+  return delimited_expression_list(parser, "[]");
+end
+
+fn parenthesized_expression_list(parser) do
+  // parenthesized_expression_list ::= '(' expression_list ')'
+  
+  return delimited_expression_list(parser, "()");
+end
+
+export fn New_Statement_If(If, Then, End, Test, Body, Else) do
+  assert_is_token_match("New_Statement_If.If", If, /^(els)?if$/);
+  assert_is_maybe_kind("New_Statement_If.Then", Then, 'Token');
+  if isJust(Then) then
+    assert_is_token_equal("New_Statement_If.Then.Just", Then.Just, 'then');
+  end
+  assert_is_maybe_kind("New_Statement_If.End", End, 'Token');
+  if isJust(End) then
+    assert_is_token_equal("New_Statement_If.End.Just", End.Just, 'end');
+  end
+  assert_is_kind("New_Statement_If.Test", Test, 'Expression');
+  assert_is_kind("New_Statement_If.Body", Body, 'Statement');
+  assert_is_string_match("New_Statement_If.Body.Tag", Body.Tag, /^(List|Block)$/);
+  assert_is_maybe_kind("New_Statement_If.Else", Else, 'Statement');
+  if isJust(Else) then
+    assert_is_string_match("New_Statement_If.Else.Just.Tag", Else.Just.Tag, /^(If|List|Block)$/);
+  end
+  return {
+    Kind: 'Statement',
+    Tag: 'If',
+    If,
+    Then,
+    End,
+    Test,
+    Body,
+    Else
+  };
+end
+
+fn if_statement_sp1(parser, ifOrElsifToken, captureEndToken) do
+  // The 'if' or 'elsif' has already been consumed.
+  
+  if !match_any(parser, parser.initial_expression_tokens) then
+    expect(parser, 'EXPRESSION', "expected EXPRESSION after `if`");
+  end
+  let test = expr(parser);
+  let thenToken = expect(parser, 'then', 'expected `then` after `if EXPRESSION`');
+  let body = statement_list(parser);
+  let tail = maybe_else_statement_sp1(parser, captureEndToken);
+  let endToken = Just(captureEndToken.value);
+  return New_Statement_If(ifOrElsifToken, Just(thenToken), endToken, test, body, tail);
+end
+
+fn maybe_else_statement_sp1(parser, captureEndToken) do
+  if match(parser, 'end') then
+    captureEndToken.value = advance(parser);
+    return None('Statement');
+  end
+  if match(parser, 'elsif') then
+    let elsifToken = advance(parser);
+    return Just(if_statement_sp1(parser, elsifToken, captureEndToken));
+  end
+  if !skip(parser, 'else') then
+    expect(parser, 'elsif|else|end', 'expected `elsif`, `else`, or `end` after `if EXPRESSION then STATEMENT...`)');
+  end
+  let body = Just(statement_list(parser));
+  captureEndToken.value = expect(parser, 'end', 'expected `end` after `else STATEMENT...`');
+  return body;
+end
+
+fn if_statement_sjs(parser, ifToken) do
+  // The 'if' has already been consumed.
+  
+  let opener = expect(parser, 'LPAREN', "expected `(` after `if`");
+  let test = expr(parser);
+  let closer = expect(parser, 'RPAREN', "expected `)` after `if (EXPRESSION`");
+  test = New_Expression_Grouping(opener, closer, test);
+  let body = statement_block(parser, "after `if (EXPRESSION)`");
+  let alternative = maybe_else_statement_sjs(parser);
+  return New_Statement_If(ifToken, None('Token'), None('Token'), test, body, alternative);
+end
+
+fn maybe_else_statement_sjs(parser) do
+  if !skip(parser, 'else') then
+    return None('Statement');
+  end
+  if match(parser, 'if') then
+    let ifToken = advance(parser);
+    return Just(if_statement_sjs(parser, ifToken));
+  end
+  return Just(statement_block(parser, "or `if` after `else`"));
+end
+
+fn if_statement(parser) do
+  let ifToken = expect(parser, 'if');
+  return parser.is_spectra ? if_statement_sp1(parser, ifToken, {  }) : if_statement_sjs(parser, ifToken);
+end
+
+export fn New_Statement_While(While, Test, Body) do
+  assert_is_token_equal("New_Statement_While.While", While, 'while');
+  assert_is_kind("New_Statement_While.Test", Test, 'Expression');
+  assert_is_kind_tag("New_Statement_While.Body", Body, 'Statement', 'Block');
+  return {
+    Kind: 'Statement',
+    Tag: 'While',
+    While,
+    Test,
+    Body
+  };
+end
+
+fn while_statement_sp1(parser) do
+  let whileToken = expect(parser, 'while');
+  if !match_any(parser, parser.initial_expression_tokens) then
+    expect(parser, 'EXPRESSION', "expected EXPRESSION after `while`");
+  end
+  let test = expr(parser);
+  let body = statement_block(parser, "after `while EXPRESSION`");
+  return New_Statement_While(whileToken, test, body);
+end
+
+fn while_statement_sjs(parser) do
+  let whileToken = expect(parser, 'while');
+  expect(parser, 'LPAREN', "expected `(` after `while`");
+  let test = expr(parser);
+  expect(parser, 'RPAREN', "expected `)` after `while (EXPRESSION`");
+  let body = statement_block(parser, "after `while (EXPRESSION)`");
+  return New_Statement_While(whileToken, test, body);
+end
+
+fn while_statement(parser) do
+  return parser.is_spectra ? while_statement_sp1(parser) : while_statement_sjs(parser);
+end
+
+export fn New_Statement_For(For, VarKeyword, Vars, Collection, Body, VarsBracketed) do
+  assert_is_token_equal("New_Statement_For.For", For, 'for');
+  assert_is_maybe_kind("New_Statement_For.VarKeyword", VarKeyword, 'Token');
+  if isJust(VarKeyword) then
+    assert_is_string_match("New_Statement_For.VarKeyword.Just.Text", VarKeyword.Just.Text, varLetOrConst);
+  end
+  assert_is_kind_tag("New_Statement_For.Vars", Vars, 'List', 'Identifiers');
+  assert_is_kind("New_Statement_For.Collection", Collection, 'Expression');
+  assert_is_kind("New_Statement_For.Body", Body, 'Statement', 'Block');
+  assert_is_boolean("New_Statement_For.VarsBracketed", VarsBracketed);
+  return {
+    Kind: 'Statement',
+    Tag: 'For',
+    For,
+    VarKeyword,
+    Vars,
+    Collection,
+    Body,
+    VarsBracketed
+  };
+end
+
+fn for_statement(parser) do
+  let forToken = expect(parser, 'for');
+  if !parser.is_spectra then
+    expect(parser, 'LPAREN', "expected `(` after `for`");
+  end
+  let varKw = skip_any(parser, [
+    'let',
+    'var',
+    'const'
+  ]);
+  let lbrack = skip(parser, 'LBRACK');
+  let vars = identifier_list(parser);
+  if lbrack then
+    expect(parser, 'RBRACK');
+  end
+  expect(parser, 'of');
+  let collection = expr(parser);
+  if !parser.is_spectra then
+    expect(parser, 'RPAREN', "expected `)` after `for (...`");
+  end
+  let body = statement_block(parser, "after `for (...)`");
+  let result = New_Statement_For(forToken, varKw, vars, collection, body, !!lbrack);
+  return result;
+end
+
+export fn New_Statement_Throw(Throw, Expression) do
+  assert_is_token_equal("New_Statement_Throw.Throw", Throw, 'throw');
+  assert_is_kind("New_Statement_Throw.Expression", Expression, 'Expression');
+  return {
+    Kind: 'Statement',
+    Tag: 'Throw',
+    Expression
+  };
+end
+
+fn throw_statement(parser) do
+  let throwToken = expect(parser, 'throw');
+  let expression = expr(parser);
+  expect(parser, 'SEMICOLON');
+  return New_Statement_Throw(throwToken, expression);
+end
+
+export fn New_Statement_Return(Return, Expression) do
+  assert_is_token_equal("New_Statement_Return.Return", Return, 'return');
+  assert_is_maybe_kind("New_Statement_Return.Expression", Expression, 'Expression');
+  return {
+    Kind: 'Statement',
+    Tag: 'Return',
+    Expression
+  };
+end
+
+fn return_statement(parser) do
+  let returnToken = expect(parser, 'return');
+  let expression = maybe_expr(parser);
+  expect(parser, 'SEMICOLON');
+  return New_Statement_Return(returnToken, expression);
+end
+
+export fn New_Statement_Expression(Expression) do
+  assert_is_kind("New_Statement_Expression.Expression", Expression, 'Expression');
+  return {
+    Kind: 'Statement',
+    Tag: 'Expression',
+    Expression
+  };
+end
+
+fn maybe_statement(parser, exported) do
+  let statement;
+  //console.log(`maybe_statement, at ${showCurrentToken(parser)}`);
+  
+  if match(parser, 'if') then
+    statement = if_statement(parser);
+  elsif match(parser, 'while') then
+    statement = while_statement(parser);
+  elsif match(parser, 'for') then
+    statement = for_statement(parser);
+  elsif match(parser, 'throw') then
+    statement = throw_statement(parser);
+  elsif match(parser, 'return') then
+    statement = return_statement(parser);
+  elsif isJust(statement = maybe_expr(parser)) then
+    if exported then
+      throw NewSyntaxError("expression statements cannot be exported", exported);
+    end
+    expect(parser, 'SEMICOLON');
+    statement = New_Statement_Expression(statement.Just);
+  else
+    return None('Declaration');
+    //throw NewSyntaxError("expected STATEMENT", curtok(parser));
+    
+  end
+  return Just(New_Declaration_Statement(statement));
+end
+
+export fn New_FunctionSignature(DelimiterLeft, DelimiterRight, FormalParameters) do
+  assert_is_token_equal("New_FunctionSignature.DelimiterLeft", DelimiterLeft, '(');
+  assert_is_token_equal("New_FunctionSignature.DelimiterRight", DelimiterRight, ')');
+  assert_is_kind_tag("New_FunctionSignature.FormalParameters", FormalParameters, 'List', 'Identifiers');
+  return {
+    Kind: 'FunctionSignature',
+    Tag: 'FunctionSignature',
+    DelimiterLeft,
+    DelimiterRight,
+    FormalParameters
+  };
+end
+
+fn function_signature(parser) do
+  let lparen = expect(parser, 'LPAREN', "expected `(` to begin function parameter list");
+  let identifiers = optional_identifier_list(parser);
+  let rparen = expect(parser, 'RPAREN', 'expected `,` or `)`');
+  return New_FunctionSignature(lparen, rparen, identifiers);
+end
+
+// A Statement_List is a list of statements -- i.e., a list of Declaration-or-Statement elements
+
+
+export fn New_Statement_List(Statements) do
+  assert_is_list_of("New_Statement_List.Statements", Statements, kind_asserter('Declaration'));
+  return {
+    Kind: 'Statement',
+    Tag: 'List',
+    Statements
+  };
+end
+
+// A Statement_Block is a Statement_List surrounded by brackets (do/end, {/}, etc.)
+
+
+export fn New_Statement_Block(Opener, Closer, Statements) do
+  assert_is_token_match("New_Statement_Block.Opener", Opener, /^(do|[{])$/);
+  assert_is_token_match("New_Statement_Block.Closer", Closer, /^(end|[}])$/);
+  assert_is_list_of("New_Statement_Block.Statements", Statements, kind_asserter('Declaration'));
+  return {
+    Kind: 'Statement',
+    Tag: 'Block',
+    Opener,
+    Closer,
+    Statements
+  };
+end
+
+fn list_of_statements(parser) do
+  let statements = [ ];
+  let statement;
+  while isJust(statement = maybe_declaration(parser)) do
+    statements.push(statement.Just);
+  end
+  return statements;
+end
+
+fn statement_list(parser) do
+  return New_Statement_List(list_of_statements(parser));
+end
+
+fn statement_block_sp1(parser, extra_expect_message) do
+  let opener = expect(parser, 'do', `expected \`do\` ${extra_expect_message}`);
+  let statement_list = list_of_statements(parser);
+  let closer = expect(parser, 'end', "expected DECLARATION or `end`");
+  return New_Statement_Block(opener, closer, statement_list);
+end
+
+fn statement_block_sjs(parser, extra_expect_message) do
+  let opener = expect(parser, 'LBRACE', `expected \`{\` ${extra_expect_message}`);
+  let statement_list = list_of_statements(parser);
+  let closer = expect(parser, 'RBRACE', "expected DECLARATION or `}`");
+  return New_Statement_Block(opener, closer, statement_list);
+end
+
+fn statement_block(parser, msg) do
+  return parser.is_spectra ? statement_block_sp1(parser, msg) : statement_block_sjs(parser, msg);
+end
+
+fn function_declaration(parser, exported, is_async) do
+  // function_declaration := function_kw SYMBOL '(' optional_identifier_list? ')' body
+  
+  expect(parser, parser.function_kw);
+  let name = expect(parser, 'SYMBOL', 'expected SYMBOL (to define the function name)');
+  //console.log(`after name in function_declaration, at ${showCurrentToken(parser)}`);
+  
+  let signature = function_signature(parser);
+  //console.log(`after function_signature in function_declaration, at ${showCurrentToken(parser)}`);
+  
+  let body = statement_block(parser, "at start of function body");
+  return New_Declaration_Function(name.Text, signature, body, !!exported, !!is_async);
+end
+
+fn variable_declaration(parser, exported) do
+  let kw = skip_any(parser, [
+    'let',
+    'var',
+    'const'
+  ]);
+  if isNone(kw) then
+    expect(parser, 'let', "expected `let`, `var`, or `const`");
+  end
+  kw = kw.Just;
+  if skip(parser, 'LBRACK') then
+    let variables = identifier_list(parser);
+    expect(parser, 'RBRACK');
+    let assignOp = expect(parser, 'ASSIGN', "expected '=' after 'let [...]'");
+    if assignOp.Text !== '=' then
+      throw NewSyntaxError("expected '=' after 'let [...]'", assignOp);
+    end
+    let rhs = expr(parser);
+    expect(parser, 'SEMICOLON');
+    return New_Declaration_Variables(kw, variables, rhs, !!exported);
+  end
+  let lhs = expect(parser, 'SYMBOL');
+  let rhs = None('Expression');
+  if text(parser) === '=' && expect(parser, 'ASSIGN', `expected '=' or ';' after '${kw.Text}'`) then
+    rhs = Just(expr(parser));
+  end
+  expect(parser, 'SEMICOLON');
+  return New_Declaration_Variable(kw, lhs.Text, rhs, !!exported);
+end
+
+//let assignment_operator = new RegExp('^(=|+=|-=|*=|/=)$');
+
+
+fn is_binary(x, expected_operator) do
+  return x !== null && typeof x === 'object' && x.Kind === 'Expression' && x.Tag === 'Binary' && x.Operator === expected_operator;
+end
+
+export fn New_Import_List(Import, Lbrace, Rbrace, From, ImportList, ModulePath) do
+  assert_is_token_equal("New_Import_List.Import", Import, 'import');
+  assert_is_token_type("New_Import_List.Lbrace", Lbrace, 'LBRACE');
+  assert_is_token_type("New_Import_List.Rbrace", Rbrace, 'RBRACE');
+  assert_is_token_type("New_Import_List.From", From, 'from');
+  assert_is_kind_tag("New_Import_List.ImportList", ImportList, 'List', 'Identifiers');
+  assert_is_token_type("New_Import_List.ModulePath", ModulePath, 'STRING');
+  return {
+    Kind: 'Import',
+    Tag: 'Import',
+    Import,
+    ModulePath,
+    ImportList
+  };
+end
+
+export fn New_Import_As(Import, Star, As, From, Name, ModulePath) do
+  assert_is_token_equal("New_Import_As.Import", Import, 'import');
+  assert_is_token_equal("New_Import_As.Star", Star, '*');
+  assert_is_token_equal("New_Import_As.From", From, 'from');
+  assert_is_token_type("New_Import_As.Name", Name, 'SYMBOL');
+  assert_is_token_type("New_Import_As.ModulePath", ModulePath, 'STRING');
+  return {
+    Kind: 'Import',
+    Tag: 'As',
+    Import,
+    Star,
+    As,
+    From,
+    Name,
+    ModulePath
+  };
+end
+
+fn maybe_import(parser) do
+  //console.log(`maybe_import at ${showCurrentToken(parser)}`);
+  
+  if !match(parser, 'import') then
+    return None('Import');
+  end
+  let importToken = advance(parser);
+  if match(parser, 'STAR') then
+    let starToken = advance(parser);
+    let asToken = expect(parser, 'as');
+    let name = expect(parser, 'SYMBOL');
+    let fromToken = expect(parser, 'from');
+    let path = expect(parser, 'STRING');
+    expect(parser, 'SEMICOLON');
+    return Just(New_Import_As(importToken, starToken, asToken, fromToken, name, path));
+  end
+  let lbraceToken = expect(parser, 'LBRACE', 'expected `{` after `import`');
+  let identifiers = identifier_list(parser);
+  let rbraceToken = expect(parser, 'RBRACE', 'expected `,` or `}` in import list');
+  let fromToken = expect(parser, 'from', 'expected `from` after `}` in import statement');
+  let module_path = skip(parser, 'STRING');
+  if !module_path then
+    throw new SyntaxError('expected STRING after `from` (representing module path)', curtok(parser));
+  end
+  expect(parser, 'SEMICOLON');
+  return Just(New_Import_List(importToken, lbraceToken, rbraceToken, fromToken, identifiers, module_path));
+end
+
+export fn New_Declaration_Function(Name, Signature, Body, Exported, IsAsync) do
+  assert_is_string("New_Declaration_Function.Name", Name);
+  assert_is_kind("New_Declaration_Function.Signature", Signature, 'FunctionSignature');
+  assert_is_kind_tag("New_Declaration_Function.Body", Body, 'Statement', 'Block');
+  assert_is_boolean("New_Declaration_Function.Exported", Exported);
+  assert_is_boolean("New_Declaration_Function.IsAsync", IsAsync);
+  return {
+    Kind: 'Declaration',
+    Tag: 'Function',
+    Name,
+    Signature,
+    Body,
+    Exported,
+    IsAsync
+  };
+end
+
+const varLetOrConst = new RegExp('^(var|let|const)$');
+
+export fn New_Declaration_Variable(Keyword, Variable, Initializer, Exported) do
+  assert_is_token_match('New_Declaration_Variable.Keyword', Keyword, varLetOrConst);
+  assert_is_string('New_Declaration_Variable.Variable', Variable);
+  assert_is_maybe_kind('New_Declaration_Variable.Initializer', Initializer, 'Expression');
+  assert_is_boolean('New_Declaration_Variable.Exported', Exported);
+  return {
+    Kind: 'Declaration',
+    Tag: 'Variable',
+    Keyword,
+    Variable,
+    Initializer,
+    Exported
+  };
+end
+
+export fn New_List_Identifiers(Identifiers, Commas) do
+  assert_is_list_of('New_List_Identifiers.Identifiers', Identifiers, token_type_asserter('SYMBOL'));
+  assert_is_list_of('New_List_Identifiers.Commas', Commas, token_type_asserter('COMMA'));
+  return {
+    Kind: 'List',
+    Tag: 'Identifiers',
+    Identifiers,
+    Commas
+  };
+end
+
+export fn New_Declaration_Variables(Keyword, Variables, Initializer, Exported) do
+  assert_is_token_match('New_Declaration_Variables.Keyword', Keyword, varLetOrConst);
+  assert_is_kind_tag('New_Declaration_Variables.Variables', Variables, 'List', 'Identifiers');
+  assert_is_kind('New_Declaration_Variables.Initializer', Initializer, 'Expression');
+  assert_is_boolean('New_Declaration_Variables.Exported', Exported);
+  return {
+    Kind: 'Declaration',
+    Tag: 'Variables',
+    Keyword,
+    Variables,
+    Initializer,
+    Exported
+  };
+end
+
+export fn New_Declaration_Statement(Statement) do
+  assert_is_kind('New_Declaration_Statement.Statement', Statement, 'Statement');
+  return {
+    Kind: 'Declaration',
+    Tag: 'Statement',
+    Statement
+  };
+end
+
+export fn New_Declaration_Comments(Comments) do
+  return {
+    Kind: 'Declaration',
+    Tag: 'Comments',
+    Comments
+  };
+end
+
+fn maybe_comments(parser) do
+  let comments = [ ];
+  while match_any(parser, [
+    'EOL_COMMENT',
+    'BLOCK_COMMENT'
+  ]) do
+    comments.push(advance(parser));
+  end
+  return comments;
+end
+
+fn maybe_declaration(parser) do
+  //console.log(`maybe_declaration, at ${showCurrentToken(parser)}`);
+  
+  let comments = maybe_comments(parser);
+  if comments.length > 0 then
+    return Just(New_Declaration_Comments(comments));
+  end
+  let exported = skip(parser, 'export');
+  let is_async = skip(parser, 'async');
+  if !!is_async && peek(parser) !== parser.function_kw then
+    expect(parser, 'UNMATCHABLE', `expected \`${parser.function_kw}\` after \`async\``);
+  end
+  if match(parser, 'EOF') then
+    if exported then
+      throw new SyntaxError(`unexpected end-of-input after 'export'`);
+    end
+    if is_async then
+      throw new SyntaxError(`unexpected end-of-input after 'async'`);
+    end
+    return None('DECLARATION');
+  elsif match(parser, parser.function_kw) then
+    return Just(function_declaration(parser, exported, is_async));
+  elsif match_any(parser, [
+    'let',
+    'var',
+    'const'
+  ]) then
+    return Just(variable_declaration(parser, exported));
+  else
+    return maybe_statement(parser, exported);
+  end
+end
+
+export fn New_ModuleName(Module, Name) do
+  assert_is_token_type("New_ModuleName.Module", Module, 'module');
+  assert_is_token_type("New_ModuleName.Name", Name, 'SYMBOL');
+  let result = {
+    Kind: 'ModuleName',
+    Tag: 'ModuleName',
+    Module,
+    Name
+  };
+  //console.log(`ModuleName is ${JSON.stringify(result)}`);
+  
+  return result;
+end
+
+fn maybe_module_name(parser) do
+  //console.log(`maybe_module_name, at ${showCurrentToken(parser)}`);
+  
+  var Module = skip(parser, 'module');
+  if !Module then
+    return None('ModuleName');
+  end
+  //console.log(`after \`module\`, at ${showCurrentToken(parser)}`);
+  
+  let module_name = skip(parser, 'SYMBOL');
+  //console.log(`module_name is ${showToken(module_name)}`);
+  
+  if module_name === null then
+    throw new SyntaxError('expected SYMBOL after `module`', curtok(parser));
+  end
+  expect(parser, 'SEMICOLON');
+  return Just(New_ModuleName(Module, module_name));
+end
+
+export fn New_Unit(ModuleComments, Module, ImportList, DeclarationList, ExpectedOutput) do
+  assert_is_kind_tag('New_Unit.ModuleComments', ModuleComments, 'Declaration', 'Comments');
+  assert_is_maybe_kind("New_Unit.Module", Module, 'ModuleName');
+  assert_is_list_of("New_Unit.ImportList", ImportList, kind_asserter('Import'));
+  assert_is_list_of("New_Unit.DeclarationList", DeclarationList, kind_asserter('Declaration'));
+  assert_is_string("New_Unit.ExpectedOutput", ExpectedOutput);
+  return {
+    Kind: 'Unit',
+    Tag: 'Unit',
+    ModuleComments,
+    Module,
+    ImportList,
+    DeclarationList,
+    ExpectedOutput
+  };
+end
+
+fn unit(parser) do
+  //console.log(`unit, at ${showCurrentToken(parser)}`);
+  
+  let ModuleComments = New_Declaration_Comments(maybe_comments(parser));
+  let Module = maybe_module_name(parser);
+  //console.log(`after module declaration, at ${showCurrentToken(parser)}`);
+  
+  let item;
+  let ImportList = [ ];
+  while isJust(item = maybe_import(parser)) do
+    ImportList.push(item.Just);
+  end
+  let StatementList = list_of_statements(parser);
+  let output;
+  if output = skip(parser, 'OUTPUT_COMMENT') then
+    output = output.Text;
+  else
+    output = '';
+  end
+  expect(parser, 'EOF', "expected DECLARATION or EOF");
+  return New_Unit(ModuleComments, Module, ImportList, StatementList, output);
+end
+
+// Return value is an AST; see "./syntax-tree-format.md" for details.
+
+
+export fn Parse(parser) do
+  if match(parser, 'EOF') then
+    return None('Unit');
+  end
+  let result = Just(unit(parser));
+  expect(parser, 'EOF');
+  return result;
+end

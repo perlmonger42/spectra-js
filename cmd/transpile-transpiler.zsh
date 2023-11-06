@@ -2,26 +2,39 @@
 set -e  # exit on any error
 
 TMPDIR=$(mktemp -d /tmp/prism.XXXXXX)
-trap 'rm -rf $TMPDIR' EXIT
+if [ "$1" = --keep ]; then
+  shift
+  echo "Keeping directory $TMPDIR"
+else
+  trap 'rm -rf $TMPDIR' EXIT
+fi
 
-# compile all source code into $TMPDIR
-echo "===== Transpiling to tmp directory ====="
-for SUBDIR in cmd src 'test'; do
+# compile all {src,test}/*.sp1 source code into $TMPDIR/{src,test}/*.mjs
+echo "===== Testing ./prism ====="
+echo "Converting Spectra (./{src,test}/*.sp1)"
+echo "to JavaScript ($TMPDIR/{src,test})"
+for SUBDIR in 'src' 'test'; do
   mkdir -p $TMPDIR/$SUBDIR
-  node cmd/prism.mjs --verbose --out-dir=$TMPDIR/$SUBDIR $SUBDIR/*.[ms]js
+  for FILE in $SUBDIR/*.sp1; do
+    ./prism --out-dir=$TMPDIR/$SUBDIR $FILE
+  done
 done
 
-# copy additional resources into $TMPDIR
+# copy npm setup into $TMPDIR (so `npm test` will work)
+cp -R package.json node_modules .gitignore $TMPDIR
+
+# copy all test/resources/* into $TMPDIR/test/resources
 mkdir -p $TMPDIR/test/resources
 cp test/resources/*.{sjs,sp1} $TMPDIR/test/resources
-cp package.json .gitignore $TMPDIR
+
 cd $TMPDIR
-npm install
+echo "===== unit tests of transpiled lexer and parser ====="
+#npm install
+npm run test-brief  # this tests modules src/sjs-{lexer,parser}.mjs
+#echo "===== building transpiled transpiler ====="
+#cmd/make-prism.zsh --output ./prism_0 ./src/{sjs-lexer,sjs-parser,emit-js,prism}.mjs
+echo "===== integration tests of transpiled transpiler ====="
+node src/run-tests.mjs  # this tests program `src/prism.mjs` on test/resources/*
 
-# test the transpiled version of the transpiler
-echo "===== Testing transpiled transpiler ====="
-npm test
-node cmd/run-tests.mjs
-node cmd/prism.mjs --verbose src/*.mjs cmd/*.mjs
-
-tree --gitignore $TMPDIR
+#echo "===== final content of $TMPDIR ====="
+#tree --gitignore $TMPDIR

@@ -1,6 +1,9 @@
 {
   "scripts": {
-    "test": "mocha -R spec"
+    "test": "mocha -R spec",
+    "test-brief": "mocha -R min test/*.mjs",
+    "test-nyan": "mocha -R nyan test/*.mjs",
+    "test-progress": "mocha -R progress test/*.mjs"
   },
   "devDependencies": {
     "chai": "^4.3.7",

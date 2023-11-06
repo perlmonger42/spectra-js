@@ -11,9 +11,12 @@ RESET=$'\033[0m'
 while true; do
   sleep .25
   #echo === Scanning... ===
-  if [[  ( ! -f $LATEST ) || -n "$(find src cmd test -name '*.[sm]js' -newer $LATEST -print | head -n 1)" ]]; then
+  if [[  ( ! -f $LATEST ) || -n "$(find src cmd test -name '*.sp1' -newer $LATEST -print | head -n 1)" ]]; then
     clear
-    cmd/transpile-transpiled-transpiler.zsh && echo "${GREEN}PASSED${RESET}" || echo "${RED}FAILED${RESET}"
+    cmd/transpile-transpiler.zsh && echo "${GREEN}PASSED${RESET}" || echo "${RED}FAILED${RESET}"
+
+    #cmd/transpile-transpiled-transpiler.zsh && echo "${GREEN}PASSED${RESET}" || echo "${RED}FAILED${RESET}"
+
     #echo '===== Running unit tests =====' && npm test && \
     #  echo '===== Running test scripts =====' && node cmd/run-tests.mjs && \
     #  echo '===== Compiling {src,cmd}/*.mjs =====' && node cmd/prism.mjs --verbose src/*.mjs cmd/*.mjs
