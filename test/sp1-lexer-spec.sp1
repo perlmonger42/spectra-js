@@ -1,6 +1,6 @@
 // module main;
 import { expect} from "chai";
-import { NextItem, NewLexer} from "../src/sjs-lexer.mjs";
+import { NextItem, NewLexer} from "../src/sp1-lexer.mjs";
 
 
 fn match(token, kind, text) do

@@ -1,5 +1,5 @@
 // module main;
-import { describe, isJust, isNone, InternalError, is_kind, is_kind_tag} from '../src/sjs-parser.mjs';
+import { describe, isJust, isNone, InternalError, is_kind, is_kind_tag} from '../src/sp1-parser.mjs';
 
 
 let emitter;

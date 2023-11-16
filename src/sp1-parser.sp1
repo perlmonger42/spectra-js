@@ -1,5 +1,5 @@
 // module main;
-import { NextItem, LocAfter} from "./sjs-lexer.mjs";
+import { NextItem, LocAfter} from "./sp1-lexer.mjs";
 
 
 // Tokens are objects with this format:

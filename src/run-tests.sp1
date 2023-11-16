@@ -1,7 +1,7 @@
 // module main;
 import { globSync} from 'glob';
 import { spawn} from 'child_process';
-import { describe} from '../src/sjs-parser.mjs';
+import { describe} from '../src/sp1-parser.mjs';
 import * as fs from 'fs';
 
 

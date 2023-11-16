@@ -30,9 +30,9 @@ cp test/resources/*.{sjs,sp1} $TMPDIR/test/resources
 cd $TMPDIR
 echo "===== unit tests of transpiled lexer and parser ====="
 #npm install
-npm run test-brief  # this tests modules src/sjs-{lexer,parser}.mjs
+npm run test-brief  # this tests modules src/sp1-{lexer,parser}.mjs
 #echo "===== building transpiled transpiler ====="
-#cmd/make-prism.zsh --output ./prism_0 ./src/{sjs-lexer,sjs-parser,emit-js,prism}.mjs
+#cmd/make-prism.zsh --output ./prism_0 ./src/{sp1-lexer,sp1-parser,emit-js,prism}.mjs
 echo "===== integration tests of transpiled transpiler ====="
 node src/run-tests.mjs  # this tests program `src/prism.mjs` on test/resources/*
 

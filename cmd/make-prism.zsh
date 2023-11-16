@@ -35,15 +35,3 @@ for INPUT in $INPUTS[@]; do
   cmd/remove-ems.zsh < $INPUT >> $OUTPUT
 done
 chmod u+x $OUTPUT
-
-###### PREVIOUS IMPLEMENTATION
-### # cat <(echo "#!/usr/bin/env node")      \
-### #     src/sjs-lexer.mjs                  \
-### #     src/sjs-parser.mjs                 \
-### #     src/emit-js.mjs                    \
-### #     cmd/prism.mjs                      \
-### # | perl -p -e 's/^import \s*[{].*//;'                                          \
-### #           -e 's/^export\s+//;'                                                \
-### #           -e 's/^import . as fs from (.fs.)/const fs = require($1)/'          \
-### # > ./prism.mjs
-### # chmod u+x ./prism.mjs
